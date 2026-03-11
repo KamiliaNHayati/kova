@@ -1,0 +1,14 @@
+{
+    "name": "kova-x402-service",
+    "version": "1.0.0",
+    "description": "Demo X402 service for Kova — APIs behind HTTP 402 paywalls",
+    "main": "server.js",
+    "type": "module",
+    "scripts": {
+        "start": "node server.js"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "express": "^4.18.2"
+    }
+}

@@ -1,0 +1,31 @@
+{
+    "name": "Market Briefing",
+    "steps": [
+        {
+            "id": "step-price",
+            "type": "x402-service",
+            "source": "manual",
+            "service": "price-feed",
+            "url": "http://localhost:3402/api/price-feed",
+            "maxPrice": 500000,
+            "serviceAddress": "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37"
+        },
+        {
+            "id": "step-summary",
+            "type": "x402-service",
+            "source": "manual",
+            "service": "summarize",
+            "url": "http://localhost:3402/api/summarize?text=Bitcoin+market+update+today",
+            "maxPrice": 1000000,
+            "serviceAddress": "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37"
+        },
+        {
+            "id": "llm-analysis",
+            "type": "llm-analysis",
+            "llmProvider": "openrouter-free",
+            "llmModel": "google/gemini-2.0-flash-exp:free",
+            "llmPrompt": "Based on the price data and news summary, should the user BUY, SELL, or HOLD crypto? Give a clear recommendation with confidence level."
+        }
+    ],
+    "delivery": "terminal"
+}

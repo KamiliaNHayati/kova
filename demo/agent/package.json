@@ -1,0 +1,19 @@
+{
+    "name": "kova-agent",
+    "version": "1.0.0",
+    "description": "Demo AI agent that pays for X402 services via Kova smart wallet",
+    "main": "agent.js",
+    "type": "module",
+    "scripts": {
+        "start": "node agent.js"
+    },
+    "dependencies": {
+        "@stacks/network": "^7.0.0",
+        "@stacks/transactions": "^7.0.0",
+        "@stacks/wallet-sdk": "^7.2.0",
+        "cors": "^2.8.6",
+        "dotenv": "^16.3.1",
+        "express": "^5.2.1",
+        "node-telegram-bot-api": "^0.67.0"
+    }
+}
