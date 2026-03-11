@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useWallet } from "../context/WalletContext";
-import { getServiceCount, getUserService } from "../lib/contracts";
 import {
     GitBranch,
     Plus,
@@ -61,6 +60,13 @@ interface MarketService {
     ownerAddress: string;
 }
 
+// Hardcoded marketplace services — same as Services page
+// In production, this would come from the on-chain service registry
+const HARDCODED_MARKETPLACE: MarketService[] = [
+    { name: "Price Feed", url: "http://localhost:3402/api/price-feed", pricePerCall: 500000, description: "Real-time crypto price data (BTC, ETH, STX)", ownerAddress: "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37" },
+    { name: "Text Summarizer", url: "http://localhost:3402/api/summarize", pricePerCall: 1000000, description: "AI-powered text summarization", ownerAddress: "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37" },
+];
+
 // ─── Constants ───
 const OPERATORS = [
     { value: ">", label: ">" },
@@ -114,26 +120,8 @@ export default function Pipelines() {
     async function loadMarketplaceServices() {
         if (!address) return;
         setLoadingMarket(true);
-        try {
-            const countResult = await getServiceCount(address);
-            const count = countResult?.value || 0;
-            const svcs: MarketService[] = [];
-            for (let i = 0; i < Math.min(count, 20); i++) {
-                const svc = await getUserService(address, i);
-                if (svc?.value) {
-                    svcs.push({
-                        name: svc.value.name?.value || "",
-                        url: svc.value.url?.value || "",
-                        pricePerCall: parseInt(svc.value["price-per-call"]?.value || "0"),
-                        description: svc.value.description?.value || "",
-                        ownerAddress: address,
-                    });
-                }
-            }
-            setMarketServices(svcs);
-        } catch {
-            setMarketServices([]);
-        }
+        // Use hardcoded services for the demo — in production, fetch from on-chain registry
+        setMarketServices(HARDCODED_MARKETPLACE);
         setLoadingMarket(false);
     }
 

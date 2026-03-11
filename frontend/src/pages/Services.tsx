@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 const STORAGE_KEY = "kova-allowed-services";
+const EXPLICIT_KEY = "kova-allowed-services-explicit"; // tracks which specific services were clicked
 
 // Marketplace services — in production, this comes from an on-chain registry
 const MARKETPLACE_SERVICES = [
@@ -136,7 +137,7 @@ export default function Services() {
     setLoading(false);
   }
 
-  function handleAllow(serviceAddr: string) {
+  function handleAllow(serviceAddr: string, serviceName?: string) {
     setTxStatus("Confirm in your wallet...");
     allowService(serviceAddr, () => {
       setTxStatus("Transaction submitted! Waiting for confirmation...");
@@ -144,6 +145,17 @@ export default function Services() {
       const saved = getSavedServices(address!);
       if (!saved.includes(serviceAddr)) {
         saveServices(address!, [...saved, serviceAddr]);
+      }
+
+      // Track explicitly allowed service name
+      if (serviceName) {
+        try {
+          const data = JSON.parse(localStorage.getItem(EXPLICIT_KEY) || "{}");
+          const list: string[] = data[address!] || [];
+          if (!list.includes(serviceName)) list.push(serviceName);
+          data[address!] = list;
+          localStorage.setItem(EXPLICIT_KEY, JSON.stringify(data));
+        } catch { }
       }
 
       let attempts = 0;
@@ -195,7 +207,7 @@ export default function Services() {
 
   function handleAddByAddress() {
     if (!addAddr.startsWith("ST") && !addAddr.startsWith("SP")) return;
-    handleAllow(addAddr);
+    handleAllow(addAddr, undefined);
     setAddAddr("");
   }
 
@@ -205,8 +217,15 @@ export default function Services() {
     setServices(services.filter((s) => s.address !== addr));
   }
 
-  function isAllowlisted(addr: string): boolean {
-    return services.some((s) => s.address === addr && s.allowed);
+  function isAllowlisted(name: string, addr: string): boolean {
+    // Check if this specific service was explicitly allowed by the user
+    try {
+      const data = JSON.parse(localStorage.getItem(EXPLICIT_KEY) || "{}");
+      const list: string[] = data[address!] || [];
+      return list.includes(name) && services.some((s) => s.address === addr && s.allowed);
+    } catch {
+      return services.some((s) => s.address === addr && s.allowed);
+    }
   }
 
   const categories = ["All", ...new Set(MARKETPLACE_SERVICES.map((s) => s.category))];
@@ -293,7 +312,7 @@ export default function Services() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredServices.map((svc) => {
               const Icon = svc.icon;
-              const allowed = isAllowlisted(svc.address);
+              const allowed = isAllowlisted(svc.name, svc.address);
 
               return (
                 <div
@@ -341,7 +360,7 @@ export default function Services() {
                       </button>
                     ) : (
                       <button
-                        onClick={() => handleAllow(svc.address)}
+                        onClick={() => handleAllow(svc.address, svc.name)}
                         className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-accent hover:bg-accent-hover text-white transition-colors"
                       >
                         <Plus className="w-3.5 h-3.5" />

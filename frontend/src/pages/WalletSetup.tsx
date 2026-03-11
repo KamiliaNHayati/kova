@@ -11,7 +11,7 @@ import {
   removeAgent,
 } from "../lib/contracts";
 import {
-  generateAgentKeypair,
+  createAgentFromBackend,
   getSavedAgents,
   saveAgent,
   removeAgentLocal,
@@ -32,6 +32,8 @@ import {
   Zap,
   Eye,
   EyeOff,
+  Bot,
+  ChevronDown,
 } from "lucide-react";
 
 // Validation helpers
@@ -50,6 +52,8 @@ export default function WalletSetup() {
   const [walletData, setWalletData] = useState<any>(null);
   const [escrowBalance, setEscrowBalance] = useState(0);
   const [savedAgents, setSavedAgents] = useState<AgentKeypair[]>([]);
+  const [selectedAgentIdx, setSelectedAgentIdx] = useState(0);
+  const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
   const [depositAmt, setDepositAmt] = useState("");
   const [depositError, setDepositError] = useState("");
   const [withdrawAmt, setWithdrawAmt] = useState("");
@@ -84,8 +88,9 @@ export default function WalletSetup() {
   // Auto-generate first agent on mount if no wallet
   useEffect(() => {
     if (!loading && !hasWallet && !generatedAgent) {
-      const agent = generateAgentKeypair("Agent 1");
-      setGeneratedAgent(agent);
+      createAgentFromBackend("Agent 1")
+        .then((agent) => setGeneratedAgent(agent))
+        .catch(() => setTxError("Backend not running. Start agent.js first."));
     }
   }, [loading, hasWallet]);
 
@@ -161,7 +166,7 @@ export default function WalletSetup() {
     if (perCall > daily) { setPerCallError("Per-call limit cannot exceed daily limit"); return; }
 
     setTxStatus("Confirm in your wallet...");
-    createWallet(generatedAgent.address, daily, perCall, (data) => {
+    createWallet(generatedAgent.address, daily, perCall, async (data) => {
       if (data && data.error) {
         setTxError(`Transaction failed: ${data.error}`);
         setTxStatus("");
@@ -169,6 +174,18 @@ export default function WalletSetup() {
         // Save agent keypair to localStorage
         saveAgent(address!, generatedAgent);
         setSavedAgents(getSavedAgents(address!));
+
+        // Tell backend to switch to this agent's index
+        if (generatedAgent.index !== undefined) {
+          try {
+            await fetch("http://localhost:4000/api/activate-agent", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ index: generatedAgent.index }),
+            });
+          } catch { /* backend may not be running */ }
+        }
+
         setTxStatus("Wallet created! Your agent is ready.");
         setTimeout(() => checkWallet(), 3000);
       }
@@ -202,27 +219,33 @@ export default function WalletSetup() {
     });
   }
 
-  function handleGenerateAgent() {
+  async function handleGenerateAgent() {
     setTxError("");
     if (savedAgents.length >= 5) {
       setTxError("Maximum 5 agents per wallet");
       return;
     }
 
-    const agent = generateAgentKeypair(`Agent ${savedAgents.length + 1}`);
+    setTxStatus("Generating agent from backend...");
+    try {
+      const agent = await createAgentFromBackend(`Agent ${savedAgents.length + 1}`);
 
-    setTxStatus("Confirm in your wallet...");
-    addAgent(agent.address, (data) => {
-      if (data && data.error) {
-        setTxError(`Add agent failed: ${data.error}`);
-        setTxStatus("");
-      } else {
-        saveAgent(address!, agent);
-        setSavedAgents(getSavedAgents(address!));
-        setTxStatus(`Agent generated! Copy the private key to your .env`);
-        setTimeout(() => checkWallet(), 3000);
-      }
-    });
+      setTxStatus("Confirm in your wallet...");
+      addAgent(agent.address, (data) => {
+        if (data && data.error) {
+          setTxError(`Add agent failed: ${data.error}`);
+          setTxStatus("");
+        } else {
+          saveAgent(address!, agent);
+          setSavedAgents(getSavedAgents(address!));
+          setTxStatus(`Agent ${agent.address.slice(0, 8)}... added!`);
+          setTimeout(() => checkWallet(), 3000);
+        }
+      });
+    } catch (err) {
+      setTxError("Backend not running. Start agent.js first.");
+      setTxStatus("");
+    }
   }
 
   function handleRemoveAgent(agentAddr: string) {
@@ -299,35 +322,9 @@ export default function WalletSetup() {
                         )}
                       </div>
                     </div>
-                    <div>
-                      <label className="block text-[10px] text-text-muted uppercase mb-1">
-                        Private Key <span className="text-warning bg-warning/10 px-1.5 py-0.5 rounded text-[8px] font-bold ml-1">DEMO ONLY</span>
-                      </label>
-                      <div
-                        onClick={() => copyToClipboard(generatedAgent.privateKey, "create-key")}
-                        className="flex items-center justify-between px-3 py-2.5 bg-black/30 border border-border/40 rounded-lg cursor-pointer hover:border-warning/40 transition-all group"
-                      >
-                        <span className="font-mono text-xs text-text-muted truncate flex-1">
-                          {showKeyFor === "create" ? generatedAgent.privateKey : "••••••••••••••••••••••••"}
-                        </span>
-                        <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setShowKeyFor(showKeyFor === "create" ? null : "create"); }}
-                            className="p-1 hover:bg-white/5 rounded"
-                          >
-                            {showKeyFor === "create" ? <EyeOff className="w-3.5 h-3.5 text-text-muted" /> : <Eye className="w-3.5 h-3.5 text-text-muted" />}
-                          </button>
-                          {copiedField === "create-key" ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-success" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5 text-text-muted group-hover:text-warning transition-colors" />
-                          )}
-                        </div>
-                      </div>
-                      <p className="text-[10px] text-warning/70 mt-1 flex items-center gap-1">
-                        <Key className="w-3 h-3" /> Demo: copy to .env. Production: managed by Kova backend via KMS — never exposed.
-                      </p>
-                    </div>
+                    <p className="text-[10px] text-text-muted mt-2 flex items-center gap-1">
+                      <Key className="w-3 h-3 text-warning" /> Keys are securely managed by Kova Backend via KMS.
+                    </p>
                   </div>
                 )}
               </div>
@@ -362,6 +359,45 @@ export default function WalletSetup() {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* Agent Selector */}
+          {savedAgents.length > 0 && (
+            <div className="max-w-sm relative">
+              <label className="block text-xs text-text-muted mb-1.5 uppercase">Active Agent</label>
+              <button
+                onClick={() => setAgentDropdownOpen(!agentDropdownOpen)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-surface border border-border rounded-xl hover:border-accent/40 transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-warning/10 flex items-center justify-center">
+                    <Bot className="w-4 h-4 text-warning" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-medium text-white">{savedAgents[selectedAgentIdx]?.label || "Agent"}</p>
+                    <p className="text-[10px] font-mono text-text-muted truncate max-w-[220px]">{savedAgents[selectedAgentIdx]?.address || "—"}</p>
+                  </div>
+                </div>
+                <ChevronDown className={`w-4 h-4 text-text-muted transition-transform ${agentDropdownOpen ? "rotate-180" : ""}`} />
+              </button>
+              {agentDropdownOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-xl overflow-hidden shadow-xl z-50">
+                  {savedAgents.map((agent, idx) => (
+                    <button
+                      key={agent.address}
+                      onClick={() => { setSelectedAgentIdx(idx); setAgentDropdownOpen(false); }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-accent/5 transition-colors text-left ${idx === selectedAgentIdx ? "bg-accent/10 border-l-2 border-accent" : ""}`}
+                    >
+                      <Bot className="w-4 h-4 text-warning flex-shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-white">{agent.label}</p>
+                        <p className="text-[10px] font-mono text-text-muted truncate max-w-[220px]">{agent.address}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Top row: Escrow + Spending Limits */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -499,28 +535,7 @@ export default function WalletSetup() {
                       )}
                     </div>
 
-                    {/* Private Key (DEMO ONLY) */}
-                    <div
-                      onClick={() => copyToClipboard(agent.privateKey, `key-${i}`)}
-                      className="flex items-center justify-between px-3 py-2 bg-black/20 border border-border/20 rounded-lg cursor-pointer hover:border-warning/30 transition-all group"
-                    >
-                      <span className="font-mono text-[11px] text-text-muted truncate flex-1">
-                        {showKeyFor === agent.address ? agent.privateKey : "•••••••••••••••••••••"}
-                      </span>
-                      <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setShowKeyFor(showKeyFor === agent.address ? null : agent.address); }}
-                          className="p-0.5 hover:bg-white/5 rounded"
-                        >
-                          {showKeyFor === agent.address ? <EyeOff className="w-3 h-3 text-text-muted" /> : <Eye className="w-3 h-3 text-text-muted" />}
-                        </button>
-                        {copiedField === `key-${i}` ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-success" />
-                        ) : (
-                          <Key className="w-3 h-3 text-text-muted group-hover:text-warning transition-colors" />
-                        )}
-                      </div>
-                    </div>
+
                   </div>
                 ))}
               </div>

@@ -59,7 +59,7 @@ async function validateSpend(serviceAddress, amount) {
     try {
         const result = await fetchCallReadOnlyFunction({
             contractAddress: CONTRACT,
-            contractName: "agent-wallet",
+            contractName: "agent-wallet-v2",
             functionName: "validate-spend",
             functionArgs: [
                 standardPrincipalCV(OWNER),
@@ -89,7 +89,7 @@ async function agentPay(serviceAddress, amount) {
     try {
         const txOptions = {
             contractAddress: CONTRACT,
-            contractName: "agent-wallet",
+            contractName: "agent-wallet-v2",
             functionName: "agent-pay",
             functionArgs: [
                 standardPrincipalCV(OWNER),
@@ -151,7 +151,8 @@ async function getAgentKey() {
 }
 
 // ─── Config ──────────────────────────────────────────
-const AGENT_KEY = await getAgentKey();
+let AGENT_KEY = await getAgentKey();
+let activeAgentIndex = parseInt(process.env.AGENT_ACCOUNT_INDEX || "0");
 const OWNER = process.env.OWNER_ADDRESS;
 const CONTRACT = process.env.CONTRACT_ADDRESS || OWNER;
 const SERVICE_URL = process.env.SERVICE_URL || "http://localhost:3402";
@@ -181,7 +182,7 @@ if (!OWNER) {
 }
 
 // Use network object for v7 API
-const agentAddress = getAddressFromPrivateKey(AGENT_KEY, STACKS_TESTNET);
+let agentAddress = getAddressFromPrivateKey(AGENT_KEY, STACKS_TESTNET);
 
 console.log(`
 ╔══════════════════════════════════════════════════════╗
@@ -220,9 +221,10 @@ async function discoverServices() {
 
         return discovery;
     } catch (err) {
-        console.error("   ❌ Cannot reach service. Is it running?");
-        console.error(`   Start it with: cd ../x402-service && npm start\n`);
-        process.exit(1);
+        console.error("   ⚠️  Cannot reach service. Is it running?");
+        console.error(`   Start it with: cd ../x402-service && npm start`);
+        console.error(`   API server still running at localhost:${AGENT_API_PORT}\n`);
+        return null;
     }
 }
 
@@ -393,11 +395,88 @@ function startApiServer() {
         });
     });
 
+    // ─── Dynamic Agent Creation (KMS substitute for hackathon) ───
+    apiServer.use(express.json());
+
+    apiServer.post("/api/create-agent", async (req, res) => {
+        try {
+            const label = req.body.label || `Agent ${derivedAgents.length + 1}`;
+            const result = await deriveAgentAtIndex(nextAgentIndex);
+            derivedAgents.push({ ...result, label });
+            console.log(`🔑 New agent created: ${result.address} (index ${result.index})`);
+            nextAgentIndex++;
+            res.json({ address: result.address, index: result.index, label });
+        } catch (err) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    apiServer.get("/api/agents", (req, res) => {
+        // Return addresses only — never expose private keys
+        res.json(derivedAgents.map(a => ({ address: a.address, index: a.index, label: a.label })));
+    });
+
+    // ─── Activate Agent (switch running agent) ───
+    apiServer.post("/api/activate-agent", async (req, res) => {
+        try {
+            const { index } = req.body;
+            if (index === undefined || index === null) {
+                return res.status(400).json({ error: "index is required" });
+            }
+            const targetIndex = parseInt(index);
+            const mnemonic = process.env.AGENT_MNEMONIC;
+            if (!mnemonic) return res.status(500).json({ error: "No mnemonic configured" });
+
+            let wallet = await generateWallet({ secretKey: mnemonic, password: "" });
+            while (wallet.accounts.length <= targetIndex) {
+                wallet = generateNewAccount(wallet);
+            }
+            const account = wallet.accounts[targetIndex];
+            AGENT_KEY = account.stxPrivateKey;
+            agentAddress = getAddressFromPrivateKey(AGENT_KEY, STACKS_TESTNET);
+            activeAgentIndex = targetIndex;
+
+            console.log(`\n🔄 Switched active agent → ${agentAddress} (index ${targetIndex})\n`);
+            res.json({ address: agentAddress, index: targetIndex });
+        } catch (err) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    apiServer.get("/api/active-agent", (req, res) => {
+        res.json({ address: agentAddress, index: activeAgentIndex });
+    });
+
     apiServer.listen(AGENT_API_PORT, () => {
         console.log(`  🌐 Agent API running → http://localhost:${AGENT_API_PORT}/api/latest`);
         console.log(`  💡 Any app can fetch latest results from this URL\n`);
     });
 }
+
+// ─── Agent Key Manager (custodial) ──────────────────
+// Tracks derived agents from the mnemonic.
+// Production: replace with KMS API.
+const derivedAgents = [];
+let nextAgentIndex = 0;
+
+async function deriveAgentAtIndex(index) {
+    const mnemonic = process.env.AGENT_MNEMONIC;
+    if (!mnemonic) throw new Error("No AGENT_MNEMONIC in .env");
+
+    let wallet = await generateWallet({ secretKey: mnemonic, password: "" });
+    while (wallet.accounts.length <= index) {
+        wallet = generateNewAccount(wallet);
+    }
+    const account = wallet.accounts[index];
+    const address = getAddressFromPrivateKey(account.stxPrivateKey, STACKS_TESTNET);
+    return { address, index };
+}
+
+// Pre-populate with the current agent
+derivedAgents.push({ address: agentAddress, index: parseInt(process.env.AGENT_ACCOUNT_INDEX || "0"), label: "Agent 1" });
+// Skip +2 to avoid colliding with the user's connected Leather wallet
+// (user's wallet may occupy indexes 0, 1, 2, 3 — agent starts at index+2)
+nextAgentIndex = parseInt(process.env.AGENT_ACCOUNT_INDEX || "0") + 2;
 
 // ─── Main: Scheduler ────────────────────────────────
 async function main() {
@@ -408,10 +487,8 @@ async function main() {
     console.log(`📡 Endpoints: ${SERVICE_ENDPOINTS.join(", ")}`);
     console.log(`📤 Delivery: ${DELIVERY_MODE}${DELIVERY_MODE === "webhook" || DELIVERY_MODE === "both" ? ` → ${WEBHOOK_URL}` : ""}\n`);
 
-    // Start API server if enabled
-    if (DELIVERY_MODE === "api" || DELIVERY_MODE === "both") {
-        startApiServer();
-    }
+    // Start API server always (frontend needs /api/create-agent during setup)
+    startApiServer();
 
     if (SCHEDULE_MODE === "once") {
         // ─── One-shot mode ───
@@ -420,7 +497,8 @@ async function main() {
         if (isBotActive() || DELIVERY_MODE === "api" || DELIVERY_MODE === "both") {
             console.log("📱 Agent is running. Press Ctrl+C to stop.\n");
         } else {
-            process.exit(0);
+            // Keep alive for API server (frontend needs /api/create-agent)
+            console.log("🌐 API server running. Press Ctrl+C to stop.\n");
         }
 
     } else if (SCHEDULE_MODE === "interval") {

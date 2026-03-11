@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
-import { paymentMiddleware, getPayment, STXtoMicroSTX } from "x402-stacks";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const { x402PaymentRequired, getPayment, STXtoMicroSTX } = require("x402-stacks");
 
 const app = express();
 app.use(cors());
@@ -15,7 +17,7 @@ const FACILITATOR_URL = process.env.FACILITATOR_URL || "https://x402-facilitator
 
 // Price Feed — returns mock crypto prices (0.5 STX)
 app.get("/api/price-feed",
-    paymentMiddleware({
+    x402PaymentRequired({
         amount: STXtoMicroSTX(0.5),
         address: SERVICE_ADDRESS,
         network: "testnet",
@@ -41,7 +43,7 @@ app.get("/api/price-feed",
 
 // Text Summarizer — returns a simple summary (1.0 STX)
 app.get("/api/summarize",
-    paymentMiddleware({
+    x402PaymentRequired({
         amount: STXtoMicroSTX(1.0),
         address: SERVICE_ADDRESS,
         network: "testnet",

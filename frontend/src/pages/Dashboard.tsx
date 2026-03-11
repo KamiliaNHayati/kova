@@ -14,6 +14,8 @@ import {
   CheckCircle2,
   BarChart3,
   Star,
+  Bot,
+  ChevronDown,
 } from "lucide-react";
 
 interface WalletData {
@@ -40,9 +42,14 @@ export default function Dashboard() {
   const [hasWallet, setHasWallet] = useState(false);
   const [txStatus, setTxStatus] = useState("");
   const [spendHistory, setSpendHistory] = useState<SpendEntry[]>([]);
+  const [agents, setAgents] = useState<AgentKeypair[]>([]);
+  const [selectedAgentIdx, setSelectedAgentIdx] = useState(0);
+  const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
 
   useEffect(() => {
     if (!address) return;
+    const saved = getSavedAgents(address);
+    setAgents(saved);
     loadWallet();
     loadSpendHistory();
   }, [address]);
@@ -52,18 +59,21 @@ export default function Dashboard() {
     try {
       const result = await getWallet(address!);
 
-      if (result && result.value && result.value.value) {
-        const v = result.value.value;
-
-        const spent = await getSpentToday(address!);
+      // v2 contract returns: { active, balance, daily-limit, last-reset-block, per-call-limit, spent-today }
+      // Note: agent is NOT in the wallet tuple — it's managed separately
+      const v = result?.value?.value;
+      if (v && v.balance && v["daily-limit"] && v["per-call-limit"]) {
+        // Get agent address from saved agents in localStorage
+        const savedAgentsList = getSavedAgents(address!);
+        const agentAddr = savedAgentsList.length > 0 ? savedAgentsList[0].address : "—";
 
         setWalletData({
           balance: parseInt(v.balance.value),
-          agent: v.agent.value,
+          agent: agentAddr,
           dailyLimit: parseInt(v["daily-limit"].value),
           perCallLimit: parseInt(v["per-call-limit"].value),
-          spentToday: typeof spent === "object" && spent.value ? parseInt(spent.value) : 0,
-          active: v.active.value,
+          spentToday: parseInt(v["spent-today"]?.value || "0"),
+          active: v.active?.value ?? true,
         });
         setHasWallet(true);
       } else {
@@ -186,7 +196,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold">Dashboard</h1>
           <p className="text-text-muted text-sm mt-1">
@@ -214,7 +224,44 @@ export default function Dashboard() {
         </button>
       </div>
 
-      {/* Transaction status */}
+      {/* Agent Selector */}
+      {agents.length > 0 && (
+        <div className="mb-6 max-w-sm relative">
+          <label className="block text-xs text-text-muted mb-1.5 uppercase">Active Agent</label>
+          <button
+            onClick={() => setAgentDropdownOpen(!agentDropdownOpen)}
+            className="w-full flex items-center justify-between px-4 py-3 bg-surface border border-border rounded-xl hover:border-accent/40 transition-all"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-warning/10 flex items-center justify-center">
+                <Bot className="w-4 h-4 text-warning" />
+              </div>
+              <div className="text-left">
+                <p className="text-sm font-medium text-white">{agents[selectedAgentIdx]?.label || "Agent"}</p>
+                <p className="text-[10px] font-mono text-text-muted truncate max-w-[220px]">{agents[selectedAgentIdx]?.address || "—"}</p>
+              </div>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-text-muted transition-transform ${agentDropdownOpen ? "rotate-180" : ""}`} />
+          </button>
+          {agentDropdownOpen && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-xl overflow-hidden shadow-xl z-50">
+              {agents.map((agent, idx) => (
+                <button
+                  key={agent.address}
+                  onClick={() => { setSelectedAgentIdx(idx); setAgentDropdownOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-accent/5 transition-colors text-left ${idx === selectedAgentIdx ? "bg-accent/10 border-l-2 border-accent" : ""}`}
+                >
+                  <Bot className="w-4 h-4 text-warning flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-white">{agent.label}</p>
+                    <p className="text-[10px] font-mono text-text-muted truncate max-w-[220px]">{agent.address}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}      {/* Transaction status */}
       {txStatus && (
         <div className="flex items-center gap-3 p-4 mb-4 rounded-lg bg-accent/10 border border-accent/20">
           {txStatus !== "Wallet updated!" ? (
