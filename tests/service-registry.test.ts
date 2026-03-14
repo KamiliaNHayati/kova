@@ -6,7 +6,7 @@ const deployer = accounts.get("deployer")!;
 const wallet1 = accounts.get("wallet_1")!;
 const wallet2 = accounts.get("wallet_2")!;
 
-const CONTRACT = "service-registry-v2";
+const CONTRACT = "service-registry-v3";
 
 describe("register-service", () => {
   it("registers a new service and returns index 0", () => {

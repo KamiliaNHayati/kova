@@ -12,8 +12,8 @@ import { openContractCall } from "@stacks/connect";
 import { STACKS_TESTNET } from "@stacks/network";
 
 const CONTRACT_ADDRESS = "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37";
-const AGENT_WALLET = "agent-wallet-v2";
-const SERVICE_REGISTRY = "service-registry-v2";
+const AGENT_WALLET = "agent-wallet-v4";
+const SERVICE_REGISTRY = "service-registry-v3";
 
 const network = STACKS_TESTNET;
 
@@ -38,117 +38,155 @@ async function callReadOnly(
   return cvToJSON(result);
 }
 
-export async function getWallet(owner: string) {
+// v3: per-agent wallet lookup
+export async function getWallet(owner: string, agent: string) {
   return callReadOnly(
     AGENT_WALLET,
     "get-wallet",
-    [standardPrincipalCV(owner)],
+    [standardPrincipalCV(owner), standardPrincipalCV(agent)],
     owner
   );
 }
 
-export async function getBalance(owner: string) {
+export async function getBalance(owner: string, agent: string) {
   return callReadOnly(
     AGENT_WALLET,
     "get-balance",
-    [standardPrincipalCV(owner)],
+    [standardPrincipalCV(owner), standardPrincipalCV(agent)],
     owner
   );
 }
 
-export async function getDailyRemaining(owner: string) {
+export async function getDailyRemaining(owner: string, agent: string) {
   return callReadOnly(
     AGENT_WALLET,
     "get-daily-remaining",
-    [standardPrincipalCV(owner)],
+    [standardPrincipalCV(owner), standardPrincipalCV(agent)],
     owner
   );
 }
 
-
-
-export async function getSpentToday(owner: string) {
+export async function getSpentToday(owner: string, agent: string) {
   return callReadOnly(
     AGENT_WALLET,
     "get-spent-today",
-    [standardPrincipalCV(owner)],
+    [standardPrincipalCV(owner), standardPrincipalCV(agent)],
     owner
   );
 }
 
-export async function isServiceAllowed(owner: string, service: string) {
+// v3: per-agent service check
+export async function isServiceAllowed(owner: string, agent: string, service: string) {
   return callReadOnly(
     AGENT_WALLET,
     "is-service-allowed",
-    [standardPrincipalCV(owner), standardPrincipalCV(service)],
+    [standardPrincipalCV(owner), standardPrincipalCV(agent), standardPrincipalCV(service)],
     owner
   );
 }
 
-export async function getSpendNonce(owner: string) {
+export async function getSpendNonce(owner: string, agent: string) {
   return callReadOnly(
     AGENT_WALLET,
     "get-spend-nonce",
+    [standardPrincipalCV(owner), standardPrincipalCV(agent)],
+    owner
+  );
+}
+
+export async function getSpendRecord(owner: string, agent: string, nonce: number) {
+  return callReadOnly(
+    AGENT_WALLET,
+    "get-spend-record",
+    [standardPrincipalCV(owner), standardPrincipalCV(agent), uintCV(nonce)],
+    owner
+  );
+}
+
+export async function isAgentActive(owner: string, agent: string) {
+  return callReadOnly(
+    AGENT_WALLET,
+    "is-agent-active",
+    [standardPrincipalCV(owner), standardPrincipalCV(agent)],
+    owner
+  );
+}
+
+export async function getAgentCount(owner: string) {
+  return callReadOnly(
+    AGENT_WALLET,
+    "get-agent-count",
     [standardPrincipalCV(owner)],
     owner
   );
 }
 
-export async function getSpendRecord(owner: string, nonce: number) {
-  return callReadOnly(
-    AGENT_WALLET,
-    "get-spend-record",
-    [standardPrincipalCV(owner), uintCV(nonce)],
-    owner
-  );
-}
-
-// Non-custodial x402: validate before paying
+// Validate spend: explicit agent param (matches v3 operator model)
 export async function validateSpend(
   owner: string,
+  agent: string,
   service: string,
   amount: number,
-  agentAddress: string
+  senderAddress: string
 ) {
   return callReadOnly(
     AGENT_WALLET,
     "validate-spend",
-    [standardPrincipalCV(owner), standardPrincipalCV(service), uintCV(amount)],
-    agentAddress
+    [standardPrincipalCV(owner), standardPrincipalCV(agent), standardPrincipalCV(service), uintCV(amount)],
+    senderAddress
   );
 }
 
-// Escrow: deposit STX to contract
-export function deposit(
-  amount: number,
-  onFinish?: (data: any) => void
-) {
-  // Use Allow mode since user intentionally sends STX to escrow
-  return openContractCall({
-    contractAddress: CONTRACT_ADDRESS,
-    contractName: AGENT_WALLET,
-    functionName: "deposit",
-    functionArgs: [uintCV(amount)],
-    network,
-    postConditionMode: PostConditionMode.Allow,
-    postConditions: [],
-    onFinish: onFinish || (() => { }),
-  });
+// Operator management
+export async function getOperator(owner: string) {
+  return callReadOnly(
+    AGENT_WALLET,
+    "get-operator",
+    [standardPrincipalCV(owner)],
+    owner
+  );
 }
 
-// Escrow: withdraw STX from contract
-export function withdraw(
-  amount: number,
+export async function getOperatorAddress(owner: string) {
+  const result = await callReadOnly(
+    AGENT_WALLET,
+    "get-operator-address",
+    [standardPrincipalCV(owner)],
+    owner
+  );
+  if (result.type === 9) { // Optional None
+    return null;
+  }
+  if (result.type === 10) { // Optional Some
+    return result.value.value;
+  }
+  return null;
+}
+
+export function registerOperator(
+  operator: string,
   onFinish?: (data: any) => void
 ) {
   return contractCall(
     AGENT_WALLET,
-    "withdraw",
-    [uintCV(amount)],
+    "register-operator",
+    [standardPrincipalCV(operator)],
     onFinish
   );
 }
 
+export function revokeOperator(
+  onFinish?: (data: any) => void
+) {
+  return contractCall(
+    AGENT_WALLET,
+    "revoke-operator",
+    [],
+    onFinish
+  );
+}
+
+// Service registry read-only
 export async function getUserService(owner: string, index: number) {
   return callReadOnly(
     SERVICE_REGISTRY,
@@ -166,8 +204,6 @@ export async function getServiceCount(owner: string) {
     owner
   );
 }
-
-
 
 // =====================
 // Write calls (open wallet for signing)
@@ -192,6 +228,7 @@ function contractCall(
   });
 }
 
+// v3: create-wallet creates an isolated {owner, agent} wallet
 export function createWallet(
   agent: string,
   dailyLimit: number,
@@ -210,21 +247,59 @@ export function createWallet(
   );
 }
 
+// v3: deposit to a specific agent's escrow
+export function deposit(
+  agent: string,
+  amount: number,
+  onFinish?: (data: any) => void
+) {
+  return openContractCall({
+    contractAddress: CONTRACT_ADDRESS,
+    contractName: AGENT_WALLET,
+    functionName: "deposit",
+    functionArgs: [standardPrincipalCV(agent), uintCV(amount)],
+    network,
+    postConditionMode: PostConditionMode.Allow,
+    postConditions: [],
+    onFinish: onFinish || (() => { }),
+  });
+}
 
+// v3: withdraw from a specific agent's escrow
+export function withdraw(
+  agent: string,
+  amount: number,
+  onFinish?: (data: any) => void
+) {
+  return openContractCall({
+    contractAddress: CONTRACT_ADDRESS,
+    contractName: AGENT_WALLET,
+    functionName: "withdraw",
+    functionArgs: [standardPrincipalCV(agent), uintCV(amount)],
+    network,
+    postConditionMode: PostConditionMode.Allow,
+    postConditions: [],
+    onFinish: onFinish || (() => { }),
+  });
+}
 
+// v3: set-active per agent
 export function setActive(
+  agent: string,
   isActive: boolean,
   onFinish?: (data: any) => void
 ) {
   return contractCall(
     AGENT_WALLET,
     "set-active",
-    [boolCV(isActive)],
+    [standardPrincipalCV(agent), boolCV(isActive)],
     onFinish
   );
 }
 
+// v3: set-limits per agent
 export function setLimits(
+  agent: string,
   dailyLimit: number,
   perCallLimit: number,
   onFinish?: (data: any) => void
@@ -235,35 +310,12 @@ export function setLimits(
   return contractCall(
     AGENT_WALLET,
     "set-limits",
-    [uintCV(dailyLimit), uintCV(perCallLimit)],
+    [standardPrincipalCV(agent), uintCV(dailyLimit), uintCV(perCallLimit)],
     onFinish
   );
 }
 
-export function setAgent(
-  newAgent: string,
-  onFinish?: (data: any) => void
-) {
-  return contractCall(
-    AGENT_WALLET,
-    "set-agent",
-    [standardPrincipalCV(newAgent)],
-    onFinish
-  );
-}
-
-export function addAgent(
-  newAgent: string,
-  onFinish?: (data: any) => void
-) {
-  return contractCall(
-    AGENT_WALLET,
-    "add-agent",
-    [standardPrincipalCV(newAgent)],
-    onFinish
-  );
-}
-
+// v3: remove-agent (deletes the agent's wallet)
 export function removeAgent(
   agent: string,
   onFinish?: (data: any) => void
@@ -276,48 +328,35 @@ export function removeAgent(
   );
 }
 
-export async function isAgentAuthorized(owner: string, agent: string) {
-  return callReadOnly(
-    AGENT_WALLET,
-    "is-agent-authorized",
-    [standardPrincipalCV(owner), standardPrincipalCV(agent)],
-    owner
-  );
-}
-
-export async function getAgentCount(owner: string) {
-  return callReadOnly(
-    AGENT_WALLET,
-    "get-agent-count",
-    [standardPrincipalCV(owner)],
-    owner
-  );
-}
-
+// v3: allow-service per agent
 export function allowService(
+  agent: string,
   service: string,
   onFinish?: (data: any) => void
 ) {
   return contractCall(
     AGENT_WALLET,
     "allow-service",
-    [standardPrincipalCV(service)],
+    [standardPrincipalCV(agent), standardPrincipalCV(service)],
     onFinish
   );
 }
 
+// v3: disallow-service per agent
 export function disallowService(
+  agent: string,
   service: string,
   onFinish?: (data: any) => void
 ) {
   return contractCall(
     AGENT_WALLET,
     "disallow-service",
-    [standardPrincipalCV(service)],
+    [standardPrincipalCV(agent), standardPrincipalCV(service)],
     onFinish
   );
 }
 
+// Service registry
 export function registerService(
   name: string,
   description: string,

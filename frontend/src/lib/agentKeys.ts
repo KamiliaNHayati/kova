@@ -22,12 +22,12 @@ export interface AgentKeypair {
  * Request a new agent from the backend.
  * Backend derives next HD account → returns address only.
  */
-export async function createAgentFromBackend(label?: string): Promise<AgentKeypair> {
+export async function createAgentFromBackend(label?: string, index?: number): Promise<AgentKeypair> {
     try {
         const res = await fetch(`${BACKEND_URL}/api/create-agent`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ label: label || undefined }),
+            body: JSON.stringify({ label: label || undefined, index: index }),
         });
         if (!res.ok) throw new Error(`Backend error: ${res.status}`);
         const data = await res.json();

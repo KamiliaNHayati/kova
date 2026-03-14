@@ -66,10 +66,7 @@
 )
   (let (
     (count (default-to u0 (map-get? service-count contract-caller)))
-    (principal-info (unwrap! (principal-destruct? contract-caller) ERR-INVALID-PRINCIPAL))
   )
-    ;; Only standard principals can register services
-    (asserts! (is-none (get name principal-info)) ERR-INVALID-PRINCIPAL)
     (asserts! (> (len name) u0) ERR-EMPTY-NAME)
     (asserts! (> (len url) u0) ERR-EMPTY-URL)
     (asserts! (> price-per-call u0) ERR-ZERO-PRICE)

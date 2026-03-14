@@ -64,13 +64,13 @@ plan:
     - id: 0
       transactions:
         - emulated-contract-publish:
-            contract-name: agent-wallet-v2
+            contract-name: agent-wallet-v4
             emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: "contracts\\agent-wallet-v2.clar"
+            path: contracts/agent-wallet-v4.clar
             clarity-version: 3
         - emulated-contract-publish:
-            contract-name: service-registry-v2
+            contract-name: service-registry-v3
             emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: "contracts\\service-registry-v2.clar"
+            path: contracts/service-registry-v3.clar
             clarity-version: 3
       epoch: "3.2"

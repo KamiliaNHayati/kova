@@ -39,15 +39,15 @@ describe("createWallet validation", () => {
 
 describe("setLimits validation", () => {
     it("rejects zero daily limit", () => {
-        expect(() => setLimits(0, 100)).toThrow("Daily limit must be greater than 0");
+        expect(() => setLimits("ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG", 0, 100)).toThrow("Daily limit must be greater than 0");
     });
 
     it("rejects zero per-call limit", () => {
-        expect(() => setLimits(1000, 0)).toThrow("Per-call limit must be greater than 0");
+        expect(() => setLimits("ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG", 1000, 0)).toThrow("Per-call limit must be greater than 0");
     });
 
     it("rejects per-call > daily", () => {
-        expect(() => setLimits(100, 200)).toThrow("Per-call limit cannot exceed daily limit");
+        expect(() => setLimits("ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG", 100, 200)).toThrow("Per-call limit cannot exceed daily limit");
     });
 });
 

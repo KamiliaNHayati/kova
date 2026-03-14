@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { useWallet } from "../context/WalletContext";
 import { Bell, Save, Trash2, TestTube, CheckCircle2, AlertCircle, Eye, EyeOff, XCircle, Clock, Plus, Minus, Send, Globe, ChevronDown, Bot } from "lucide-react";
 import { getSavedAgents, getSelectedAgent, setSelectedAgent, type AgentKeypair } from "../lib/agentKeys";
+import { allowService, isServiceAllowed } from "../lib/contracts";
+import { openSignatureRequestPopup } from "@stacks/connect";
 
 interface TelegramConfig {
     botToken: string;
@@ -53,11 +55,11 @@ function toMinutes(value: number, unit: string): number {
 }
 
 const AVAILABLE_SERVICES = [
-    { name: "Price Feed", description: "Real-time BTC, ETH, STX prices", price: "0.5 STX", endpoint: "/api/price-feed" },
-    { name: "Text Summarizer", description: "AI-powered text summarization", price: "1 STX", endpoint: "/api/summarize" },
-    { name: "Image Generator", description: "Generate images from text prompts", price: "2 STX", endpoint: "/api/image" },
-    { name: "Sentiment Analysis", description: "Market sentiment from social feeds", price: "1.5 STX", endpoint: "/api/sentiment" },
-    { name: "On-chain Analytics", description: "Whale tracking & DeFi metrics", price: "2 STX", endpoint: "/api/analytics" },
+    { name: "Price Feed", description: "Real-time BTC, ETH, STX prices", price: "0.5 STX", endpoint: "/api/price-feed", address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663" },
+    { name: "Text Summarizer", description: "AI-powered text summarization", price: "1 STX", endpoint: "/api/summarize", address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663" },
+    { name: "Image Generator", description: "Generate images from text prompts", price: "2 STX", endpoint: "/api/image", address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663" },
+    { name: "Sentiment Analysis", description: "Market sentiment from social feeds", price: "1.5 STX", endpoint: "/api/sentiment", address: "ST3NBRSFKX28FQ2ZJ1MAKX58HKHSDNEF55B3MFHQR" },
+    { name: "On-chain Analytics", description: "Whale tracking & DeFi metrics", price: "2 STX", endpoint: "/api/analytics", address: "ST3NBRSFKX28FQ2ZJ1MAKX58HKHSDNEF55B3MFHQR" },
 ];
 
 export default function Settings() {
@@ -72,6 +74,35 @@ export default function Settings() {
     const [agents, setAgents] = useState<AgentKeypair[]>([]);
     const [selectedAgentAddr, setSelectedAgentAddr] = useState<string>("");
     const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
+    const [txStatus, setTxStatus] = useState("");
+    const [showAllServices, setShowAllServices] = useState(false);
+    const [allowedEndpoints, setAllowedEndpoints] = useState<string[]>([]);
+
+    useEffect(() => {
+        async function fetchAllowed() {
+            if (!address || !selectedAgentAddr) return;
+            
+            // Fetch explicit allowed record
+            const EXPLICIT_KEY = "kova-allowed-services-explicit";
+            let explicitList: string[] = [];
+            try {
+                const storeKey = `${EXPLICIT_KEY}-${selectedAgentAddr}`;
+                const data = JSON.parse(localStorage.getItem(storeKey) || "{}");
+                explicitList = data[address] || [];
+            } catch {}
+
+            let allowed: string[] = [];
+            for (const svc of AVAILABLE_SERVICES) {
+                try {
+                    const resp = await isServiceAllowed(address, selectedAgentAddr, svc.address);
+                    // Match mathematical allowance and explicit explicit user clicks
+                    if (resp.value === true && explicitList.includes(svc.name)) allowed.push(svc.endpoint);
+                } catch {}
+            }
+            setAllowedEndpoints(allowed);
+        }
+        fetchAllowed();
+    }, [address, selectedAgentAddr, activeTab, txStatus]);
 
     useEffect(() => {
         if (address) {
@@ -100,16 +131,125 @@ export default function Settings() {
         }
     }
 
-    function handleSave() {
-        if (!address) return;
+    async function handleSave() {
+        if (!address || !!txStatus) return; // Prevent double-clicks (debounce)
+        
         if (activeTab === "notifications") {
-            saveTelegramConfig(address, telegramConfig);
-        } else {
-            const configKey = selectedAgentAddr || address;
-            saveScheduleConfig(configKey, scheduleConfig);
+            setTxStatus("Requesting wallet signature...");
+            let nonce = Date.now().toString();
+            try {
+                const nRes = await fetch("http://localhost:4000/api/nonce");
+                const nData = await nRes.json();
+                if (nData.nonce) nonce = nData.nonce;
+            } catch (e) { console.error("Could not fetch server nonce."); }
+
+            const messageToSign = `kova:link-telegram:${address}:${nonce}`;
+
+            openSignatureRequestPopup({
+                message: messageToSign,
+                network: "testnet",
+                appDetails: { name: "Kova", icon: window.location.origin + "/favicon.ico" },
+                onFinish: async (data) => {
+                    setTxStatus("Saving config to backend...");
+                    try {
+                        const res = await fetch("http://localhost:4000/api/save-telegram-config", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                owner: address,
+                                botToken: telegramConfig.botToken,
+                                chatId: telegramConfig.chatId,
+                                thresholdSTX: telegramConfig.thresholdSTX,
+                                nonce,
+                                publicKey: data.publicKey,
+                                signature: data.signature,
+                            })
+                        });
+                        
+                        if (!res.ok) {
+                            const err = await res.json();
+                            setTxStatus(`Auth failed: ${err.error || "Unknown"}`);
+                            setTimeout(() => setTxStatus(""), 4000);
+                            return;
+                        }
+
+                        saveTelegramConfig(address, telegramConfig);
+                        setTxStatus("");
+                        setSaved(true);
+                        setTimeout(() => setSaved(false), 2000);
+                    } catch (err) {
+                        setTxStatus("Local backend not running");
+                        setTimeout(() => setTxStatus(""), 3000);
+                    }
+                },
+                onCancel: () => {
+                    setTxStatus("Signature canceled");
+                    setTimeout(() => setTxStatus(""), 3000);
+                }
+            });
+            return;
         }
-        setSaved(true);
-        setTimeout(() => setSaved(false), 2000);
+
+        const agentAddr = selectedAgentAddr;
+        if (!agentAddr) return;
+
+        const newEndpoint = scheduleConfig.serviceEndpoints; 
+        const serviceAddr = AVAILABLE_SERVICES.find(s => s.endpoint === newEndpoint)?.address;
+
+        const saveAndNotify = async () => {
+            const configKey = agentAddr || address;
+            saveScheduleConfig(configKey, scheduleConfig);
+            setSaved(true);
+            setTimeout(() => setSaved(false), 2000);
+            
+            // Sync with running backend
+            try {
+                await fetch("http://localhost:4000/api/settings", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        mode: scheduleConfig.mode,
+                        intervalValue: toMinutes(scheduleConfig.intervalValue, scheduleConfig.intervalUnit),
+                        serviceEndpoints: scheduleConfig.serviceEndpoints,
+                        agentIndex: selectedAgent?.index,
+                        agentAddr: agentAddr,
+                        ownerAddress: address
+                    })
+                });
+            } catch { console.log("Backend not running"); }
+        };
+
+        if (serviceAddr) {
+            setTxStatus("Checking on-chain rules...");
+            try {
+                const resp = await isServiceAllowed(address, agentAddr, serviceAddr);
+                if (resp.value === false) {
+                    setTxStatus("Please sign transaction to allow this service...");
+                    allowService(agentAddr, serviceAddr, (data) => {
+                        if (data && data.error) {
+                            setTxStatus(`Error: ${data.error}`);
+                        } else {
+                            setTxStatus("Tx submitted! Settings will save locally.");
+                            saveAndNotify();
+                            setTimeout(() => setTxStatus(""), 4000);
+                        }
+                    });
+                    return; 
+                }
+            } catch (err) {
+                console.error(err);
+                setTxStatus("Error checking service status");
+                console.error("Failed to check service status:", err);
+                let errMsg = "Failed to check service on-chain";
+                if (err instanceof Error) errMsg = err.message;
+                setTxStatus(`Error: ${errMsg}. Check console.`);
+                setTimeout(() => setTxStatus(""), 4000);
+                return; // Do not blindly save if the on-chain validation throws a technical error
+            }
+        }
+        
+        setTxStatus("");
+        saveAndNotify();
     }
 
     function handleClearTelegram() {
@@ -307,7 +447,7 @@ export default function Settings() {
                                         </div>
                                     </div>
                                     <p className="text-[10px] text-text-muted mt-2 flex items-center gap-1">
-                                        <AlertCircle className="w-3 h-3" /> Never shared. Stored locally in your browser.
+                                        <AlertCircle className="w-3 h-3" /> For demo this is stored in-memory — restart will clear.
                                     </p>
                                 </div>
 
@@ -385,7 +525,8 @@ export default function Settings() {
                                 )}
                                 <button
                                     onClick={handleSave}
-                                    className="flex items-center gap-2 px-5 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-medium transition-colors"
+                                    disabled={!!txStatus}
+                                    className="flex items-center gap-2 px-5 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <Save className="w-4 h-4" />
                                     Save Settings
@@ -483,44 +624,54 @@ export default function Settings() {
 
                             {/* Services to monitor */}
                             <div>
-                                <label className="block text-sm font-medium mb-2">Services to call</label>
-                                <p className="text-[10px] text-text-muted mb-3">
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="block text-sm font-medium">Services to call</label>
+                                    <button 
+                                        onClick={() => setShowAllServices(!showAllServices)}
+                                        className="text-[10px] font-medium text-accent hover:underline flex flex-col items-end"
+                                        title="Allowed services only — click 'Show all' to view marketplace"
+                                    >
+                                        {showAllServices ? "Show allowed only" : "Show all marketplace services"}
+                                    </button>
+                                </div>
+                                <p className="text-[10px] text-text-muted mb-3" title="Allowed services only — click 'Show all' to view marketplace">
                                     Select which X402 services the agent should pay for on each run.
                                 </p>
                                 <div className="space-y-2">
-                                    {AVAILABLE_SERVICES.map((svc) => {
-                                        const endpoints = scheduleConfig.serviceEndpoints.split(",").map(s => s.trim()).filter(Boolean);
-                                        const isEnabled = endpoints.includes(svc.endpoint);
+                                    {AVAILABLE_SERVICES.filter(s => showAllServices || allowedEndpoints.includes(s.endpoint) || scheduleConfig.serviceEndpoints === s.endpoint).map((svc) => {
+                                        const isEnabled = scheduleConfig.serviceEndpoints === svc.endpoint;
+                                        const isAllowed = allowedEndpoints.includes(svc.endpoint);
 
                                         return (
-                                            <button
-                                                key={svc.endpoint}
-                                                onClick={() => {
-                                                    let newEndpoints: string[];
-                                                    if (isEnabled) {
-                                                        newEndpoints = endpoints.filter(e => e !== svc.endpoint);
-                                                    } else {
-                                                        newEndpoints = [...endpoints, svc.endpoint];
-                                                    }
-                                                    setScheduleConfig({
+                                            <div key={svc.endpoint} className={`w-full flex flex-col p-3 rounded-lg border transition-all ${isEnabled ? "border-accent bg-accent/5" : "border-border hover:border-border-hover"}`}>
+                                                <button
+                                                    onClick={() => setScheduleConfig({
                                                         ...scheduleConfig,
-                                                        serviceEndpoints: newEndpoints.join(", ") || "/api/price-feed"
-                                                    });
-                                                }}
-                                                className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all ${isEnabled
-                                                    ? "border-accent bg-accent/5"
-                                                    : "border-border hover:border-border-hover"
-                                                    }`}
-                                            >
-                                                <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 ${isEnabled ? "bg-accent" : "bg-surface-2 border border-border"}`}>
-                                                    {isEnabled && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="text-sm font-medium">{svc.name}</div>
-                                                    <div className="text-[10px] text-text-muted">{svc.description}</div>
-                                                </div>
-                                                <span className="text-xs font-mono text-accent shrink-0">{svc.price}</span>
-                                            </button>
+                                                        serviceEndpoints: svc.endpoint
+                                                    })}
+                                                    className="w-full flex items-center gap-3 text-left"
+                                                >
+                                                    <div className={`w-5 h-5 flex items-center justify-center shrink-0 ${isEnabled ? "text-accent" : "text-text-muted"}`}>
+                                                        {isEnabled ? <CheckCircle2 className="w-5 h-5 fill-accent text-white" /> : <div className="w-4 h-4 rounded-full border border-border" />}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-sm font-medium">{svc.name}</div>
+                                                        <div className="text-[10px] text-text-muted">{svc.description}</div>
+                                                    </div>
+                                                    <span className="text-xs font-mono text-accent shrink-0">{svc.price}</span>
+                                                </button>
+                                                {isEnabled && !isAllowed && (
+                                                    <div className="mt-3 pl-8 flex items-center justify-between border-t border-accent/10 pt-3">
+                                                        <span className="text-[10px] text-warning flex items-center gap-1.5"><AlertCircle className="w-3.5 h-3.5" /> Service unallowed by this agent.</span>
+                                                        <button 
+                                                            onClick={handleSave} 
+                                                            className="px-3 py-1.5 bg-accent hover:bg-accent-hover text-white text-[10px] font-medium rounded-md transition-colors"
+                                                        >
+                                                            Sign to Allow
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
                                         );
                                     })}
                                 </div>
@@ -538,7 +689,10 @@ export default function Settings() {
                         </div>
 
                         {/* Footer */}
-                        <div className="flex items-center justify-end p-5 border-t border-border bg-surface-2/30">
+                        <div className="flex items-center justify-between p-5 border-t border-border bg-surface-2/30">
+                            <div className="text-sm text-accent max-w-[50%] truncate">
+                                {txStatus}
+                            </div>
                             <div className="flex items-center gap-3">
                                 {saved && (
                                     <span className="text-sm text-success flex items-center gap-1">
@@ -548,7 +702,8 @@ export default function Settings() {
                                 )}
                                 <button
                                     onClick={handleSave}
-                                    className="flex items-center gap-2 px-5 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-medium transition-colors"
+                                    disabled={!!txStatus}
+                                    className="flex items-center gap-2 px-5 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <Save className="w-4 h-4" />
                                     Save Settings
@@ -649,7 +804,7 @@ export default function Settings() {
                                 <AlertCircle className="w-3.5 h-3.5 text-accent mt-0.5 shrink-0" />
                                 <span>
                                     <strong className="text-text">Demo:</strong> delivery config is saved locally.{" "}
-                                    <strong className="text-text">Production:</strong> webhook URLs are encrypted and stored securely.
+                                    <strong className="text-text">Production:</strong> webhook URLs and config are stored on backend databases securely.
                                 </span>
                             </div>
                         </div>
@@ -665,7 +820,8 @@ export default function Settings() {
                                 )}
                                 <button
                                     onClick={handleSave}
-                                    className="flex items-center gap-2 px-5 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-medium transition-colors"
+                                    disabled={!!txStatus}
+                                    className="flex items-center gap-2 px-5 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <Save className="w-4 h-4" />
                                     Save Settings

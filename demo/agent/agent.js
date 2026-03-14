@@ -51,23 +51,51 @@ import walletSdk from "@stacks/wallet-sdk";
 const { generateWallet, generateNewAccount } = walletSdk;
 import stxNetwork from "@stacks/network";
 const { STACKS_TESTNET } = stxNetwork;
+import stxEnc from "@stacks/encryption";
+const { verifyMessageSignature } = stxEnc;
 import { initBot, requestApproval, notify, isBotActive } from "./bot.js";
 
+// ─── State Persistence ───────────────────────────────
+const STATE_FILE = "kova_state.json";
+let appState = {
+    telegram: {
+        botToken: process.env.TELEGRAM_BOT_TOKEN || null,
+        chatId: process.env.TELEGRAM_CHAT_ID || null,
+        thresholdSTX: parseFloat(process.env.APPROVAL_THRESHOLD_STX || "0.05")
+    }
+};
+
+if (fs.existsSync(STATE_FILE)) {
+    try {
+        const loaded = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
+        appState = { ...appState, ...loaded };
+        console.log("💾 Loaded state from kova_state.json");
+    } catch (e) {
+        console.error("⚠️ Failed to load state:", e.message);
+    }
+}
+
+function saveState() {
+    fs.writeFileSync(STATE_FILE, JSON.stringify(appState, null, 2));
+}
+
 // --- validate-spend: pre-flight check before agent-pay ---
+// v3 operator model: explicit agent param in function args
 async function validateSpend(serviceAddress, amount) {
     console.log(`   Validating spend rules on-chain...`);
     try {
         const result = await fetchCallReadOnlyFunction({
             contractAddress: CONTRACT,
-            contractName: "agent-wallet-v2",
+            contractName: "agent-wallet-v4",
             functionName: "validate-spend",
             functionArgs: [
                 standardPrincipalCV(OWNER),
+                standardPrincipalCV(agentAddress),
                 standardPrincipalCV(serviceAddress),
                 uintCV(amount),
             ],
             network: STACKS_TESTNET,
-            senderAddress: agentAddress,
+            senderAddress: operatorAddress,
         });
         const json = cvToJSON(result);
         if (json.success) {
@@ -75,28 +103,47 @@ async function validateSpend(serviceAddress, amount) {
             return true;
         } else {
             console.log(`   Rules check: FAILED - ${JSON.stringify(json)}\n`);
+            
+            const errCode = json.value?.value;
+            if (errCode === "103") {
+                console.log(`   ❌ ERR-NO-WALLET (103): This agent has no wallet!`);
+                console.log(`      👉 You must create a wallet + deposit STX using the 'Wallet Setup' tab in the UI first.`);
+            } else if (errCode === "108") {
+                console.log(`   ❌ ERR-SERVICE-NOT-ALLOWED (108): Service not on this agent's allowlist.`);
+                console.log(`      👉 Go to Settings or Services in the UI and allow this service for this agent.`);
+            } else if (errCode === "104") {
+                console.log(`   ❌ ERR-INSUFFICIENT-BALANCE (104): Agent escrow is out of funds.`);
+            } else if (errCode === "118") {
+                console.log(`   ❌ ERR-NOT-AUTHORIZED (118): Operator not registered for this owner.`);
+                console.log(`      👉 Owner must call register-operator with the operator address first.`);
+            } else {
+                console.log(`   ❌ Kill switch active or limits exceeded.`);
+            }
             return false;
         }
     } catch (err) {
-        console.error(`   Rules check error: ${err.message}\n`);
+        console.error(`   ❌ Failed: ${err.message}\n`);
         return false;
     }
 }
 
-// --- agent-pay: autonomous escrow payment (atomic transfer + log) ---
+// --- agent-pay: operator-signed escrow payment (atomic transfer + log + fee) ---
+// v3 operator model: operator signs and pays gas, 4-param signature
 async function agentPay(serviceAddress, amount) {
-    console.log(`   Executing agent-pay on escrow contract...`);
+    console.log(`   Executing agent-pay (operator-signed) on escrow contract...`);
+    console.log(`   Operator signs → escrow transfers STX → service + platform fee\n`);
     try {
         const txOptions = {
             contractAddress: CONTRACT,
-            contractName: "agent-wallet-v2",
+            contractName: "agent-wallet-v4",
             functionName: "agent-pay",
             functionArgs: [
                 standardPrincipalCV(OWNER),
+                standardPrincipalCV(agentAddress),
                 standardPrincipalCV(serviceAddress),
                 uintCV(amount),
             ],
-            senderKey: AGENT_KEY,
+            senderKey: OPERATOR_KEY,
             network: STACKS_TESTNET,
             anchorMode: AnchorMode.Any,
             postConditionMode: PostConditionMode.Allow,
@@ -153,14 +200,34 @@ async function getAgentKey() {
 // ─── Config ──────────────────────────────────────────
 let AGENT_KEY = await getAgentKey();
 let activeAgentIndex = parseInt(process.env.AGENT_ACCOUNT_INDEX || "0");
-const OWNER = process.env.OWNER_ADDRESS;
+let OWNER = process.env.OWNER_ADDRESS;
 const CONTRACT = process.env.CONTRACT_ADDRESS || OWNER;
 const SERVICE_URL = process.env.SERVICE_URL || "http://localhost:3402";
 
+// Operator key — signs agent-pay and pays gas
+// Derived from same mnemonic using OPERATOR_ACCOUNT_INDEX (default: 0)
+// Or use raw OPERATOR_PRIVATE_KEY. Falls back to AGENT_KEY if neither is set.
+// Production: use KMS/HSM, never store raw key in env
+let OPERATOR_KEY;
+if (process.env.OPERATOR_PRIVATE_KEY) {
+    OPERATOR_KEY = process.env.OPERATOR_PRIVATE_KEY;
+} else if (process.env.AGENT_MNEMONIC && process.env.OPERATOR_ACCOUNT_INDEX !== undefined) {
+    const opIdx = parseInt(process.env.OPERATOR_ACCOUNT_INDEX);
+    let opWallet = await generateWallet({ secretKey: process.env.AGENT_MNEMONIC, password: "" });
+    while (opWallet.accounts.length <= opIdx) {
+        opWallet = generateNewAccount(opWallet);
+    }
+    OPERATOR_KEY = opWallet.accounts[opIdx].stxPrivateKey;
+    console.log(`🔑 Operator key derived from mnemonic (account index: ${opIdx})`);
+} else {
+    OPERATOR_KEY = AGENT_KEY;
+}
+const operatorAddress = getAddressFromPrivateKey(OPERATOR_KEY, STACKS_TESTNET);
+
 // Scheduler config
-const SCHEDULE_MODE = process.env.SCHEDULE_MODE || "once"; // once | interval | pipeline
-const SCHEDULE_INTERVAL = parseInt(process.env.SCHEDULE_INTERVAL || "5"); // minutes
-const SERVICE_ENDPOINTS = (process.env.SERVICE_ENDPOINTS || "/api/price-feed")
+let SCHEDULE_MODE = process.env.SCHEDULE_MODE || "once"; // once | interval | pipeline
+let SCHEDULE_INTERVAL = parseInt(process.env.SCHEDULE_INTERVAL || "5"); // minutes
+let SERVICE_ENDPOINTS = (process.env.SERVICE_ENDPOINTS || "/api/price-feed")
     .split(",")
     .map(s => s.trim());
 
@@ -177,8 +244,7 @@ const AGENT_API_PORT = parseInt(process.env.AGENT_API_PORT || "4000");
 let latestResults = { timestamp: null, services: {}, runs: 0 };
 
 if (!OWNER) {
-    console.error("❌ Missing OWNER_ADDRESS in .env");
-    process.exit(1);
+    console.warn("⚠️  No OWNER_ADDRESS in .env — will be set dynamically from UI");
 }
 
 // Use network object for v7 API
@@ -186,21 +252,28 @@ let agentAddress = getAddressFromPrivateKey(AGENT_KEY, STACKS_TESTNET);
 
 console.log(`
 ╔══════════════════════════════════════════════════════╗
-║           🤖 Kova AI Agent v3.0 (Escrow)             ║
+║      🤖 Kova AI Agent v3.1 (Operator-Paid x402)     ║
 ╠══════════════════════════════════════════════════════╣
-║  Agent:   ${agentAddress}  ║
-║  Owner:   ${OWNER}  ║
-║  Service: ${SERVICE_URL.padEnd(39)}║
-║  Mode:    Escrow (autonomous agent-pay)              ║
+║  Agent:    ${agentAddress}  ║
+║  Operator: ${operatorAddress}  ║
+║  Owner:    ${OWNER || '(set from UI)'.padEnd(38)}║
+║  Service:  ${SERVICE_URL.padEnd(38)}║
+║  Mode:     Operator signs agent-pay (agent = logic)  ║
+║  Fee:      2% platform fee per transaction           ║
 ╚══════════════════════════════════════════════════════╝
 `);
 
+if (OPERATOR_KEY === AGENT_KEY) {
+    console.log("⚠️  OPERATOR_PRIVATE_KEY not set — using AGENT_KEY as fallback.");
+    console.log("   For production, set a separate OPERATOR_PRIVATE_KEY in .env.\n");
+}
+
 // ─── Initialize Telegram Bot ─────────────────────────
-const botToken = process.env.TELEGRAM_BOT_TOKEN;
-const botChatId = process.env.TELEGRAM_CHAT_ID;
-const botThreshold = parseFloat(process.env.APPROVAL_THRESHOLD_STX || "0.05");
+const botToken = appState.telegram.botToken;
+const botChatId = appState.telegram.chatId;
+const botThreshold = appState.telegram.thresholdSTX;
 if (botToken) {
-    initBot(botToken, botChatId, botThreshold);
+    await initBot(botToken, botChatId, botThreshold);
 } else {
     console.log("📱 Telegram bot: disabled (no TELEGRAM_BOT_TOKEN in .env)\n");
 }
@@ -228,21 +301,31 @@ async function discoverServices() {
     }
 }
 
+// ─── Main Execution Pipeline ─────────────────────────
+const runningAgents = new Set();
+const usedNonces = new Set(); // To prevent replay attacks for API calls
+
 // ─── Run a single service endpoint (escrow flow) ─────
 async function runService(endpoint) {
-    console.log(`\n─── Service: ${endpoint} ───\n`);
-
-    // 1. Discover service to get pricing info
-    let discovery;
-    try {
-        const resp = await fetch(`${SERVICE_URL}/.well-known/x402`);
-        discovery = await resp.json();
-    } catch {
-        console.log(`   ⚠️ Can't reach service discovery`);
+    if (runningAgents.has(agentAddress)) {
+        console.log(`   ⏳ Agent ${agentAddress} is already running a service. Skipping...`);
         return null;
     }
+    runningAgents.add(agentAddress);
+    try {
+        console.log(`\n─── Service: ${endpoint} ───────────\n`);
 
-    const serviceName = endpoint.replace("/api/", "");
+        // 1. Discover service to get pricing info
+        let discovery;
+        try {
+            const resp = await fetch(`${SERVICE_URL}/.well-known/x402`);
+            discovery = await resp.json();
+        } catch {
+            console.log(`   ⚠️ Can't reach service discovery`);
+            return null;
+        }
+
+        const serviceName = endpoint.replace("/api/", "");
     const serviceInfo = discovery.services?.find(s => s.name === serviceName);
     const price = serviceInfo ? serviceInfo.price : 500_000;
     const serviceAddress = discovery.address;
@@ -286,40 +369,87 @@ async function runService(endpoint) {
         return null;
     }
 
-    // 5. Call service for data (payment already happened on-chain)
+    // 5. Call service for data — include X-PAYMENT header so x402 middleware accepts
     console.log(`📡 Step 4: Fetching data from service...\n`);
-    try {
-        const response = await axios.get(`${SERVICE_URL}${endpoint}`);
-        const data = response.data;
+    const paymentProof = JSON.stringify({
+        transaction: txId,
+        payer: operatorAddress,
+        network: "stacks:2147483648",
+        scheme: "escrow",
+    });
 
-        console.log(`   ✅ Data received!\n`);
-        console.log(`   ┌─────────────────────────────────────────┐`);
-        console.log(`   │ Response:                               │`);
-        console.log(`   ├─────────────────────────────────────────┤`);
-        Object.entries(data).forEach(([key, val]) => {
-            const valStr = typeof val === "object" ? JSON.stringify(val) : String(val);
-            console.log(`   │ ${key}: ${valStr.substring(0, 40)}`);
-        });
-        console.log(`   └─────────────────────────────────────────┘\n`);
+    let data = null;
+    let attempt = 0;
+    const maxAttempts = 6;
+    const baseDelayMs = 1000;
 
-        console.log(`   Payment: ${txId}`);
-        console.log(`   Paid from escrow: ${amountSTX.toFixed(4)} STX\n`);
+    while (attempt < maxAttempts) {
+        try {
+            const response = await axios.get(`${SERVICE_URL}${endpoint}`, {
+                headers: { "X-PAYMENT": paymentProof },
+                timeout: 10000
+            });
+            data = response.data;
+            break; // Success!
+        } catch (err) {
+            const status = err.response?.status;
+            // Retry on 402 Payment Required, 429 Too Many Requests, or timeouts
+            if (status === 402 || status === 429 || err.code === 'ECONNABORTED') {
+                attempt++;
+                if (attempt >= maxAttempts) {
+                    console.error(`   ❌ Service call failed after ${maxAttempts} attempts: ${err.message}\n`);
+                    console.log(`   Note: Payment was made on-chain (tx: ${txId})`);
+                    console.log(`   The service may need time to process. Data fetch failed.\n`);
+                    notify(`⚠️ Paid for \`${endpoint}\` (tx: ${txId}) but data fetch failed: ${err.message}`);
+                    return null;
+                }
+                // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+                console.log(`   ⏳ Service returned ${status || 'timeout'} — Waiting ${delayMs/1000}s for mempool settlement...`);
+                
+                // Optional: ask provider what it sees natively
+                try {
+                    const statusRes = await axios.get(`${SERVICE_URL}/paid-status?txid=${txId}`);
+                    if (statusRes.data?.paid) {
+                        console.log(`   🔗 Provider sees tx natively: ${statusRes.data.status}`);
+                    }
+                } catch(e) {}
+                
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            } else {
+                // Hard failure (e.g. 500 server error, 404 not found)
+                console.error(`   ❌ Service call failed: ${err.message}\n`);
+                console.log(`   Note: Payment was made on-chain (tx: ${txId})`);
+                notify(`⚠️ Paid for \`${endpoint}\` (tx: ${txId}) but data fetch failed: ${err.message}`);
+                return null;
+            }
+        }
+    }
+    
+    // Success path
+    console.log(`   ✅ Data received!\n`);
+    console.log(`   ┌─────────────────────────────────────────┐`);
+    console.log(`   │ Response:                               │`);
+    console.log(`   ├─────────────────────────────────────────┤`);
+    Object.entries(data).forEach(([key, val]) => {
+        const valStr = typeof val === "object" ? JSON.stringify(val) : String(val);
+        console.log(`   │ ${key}: ${valStr.substring(0, 40)}`);
+    });
+    console.log(`   └─────────────────────────────────────────┘\n`);
 
-        notify([
-            `✅ *Paid for ${endpoint}*`,
-            `Amount: *${amountSTX.toFixed(4)} STX*`,
-            `TxID: \`${txId.toString().slice(0, 10)}...\``,
-            `Method: Escrow agent-pay (autonomous)`,
-        ].join("\n"));
+    console.log(`   Payment: ${txId}`);
+    console.log(`   Paid from escrow: ${amountSTX.toFixed(4)} STX\n`);
 
-        return data;
-    } catch (err) {
-        console.error(`   ❌ Service call failed: ${err.message}\n`);
-        // Payment already went through, but service didn't return data
-        console.log(`   Note: Payment was made on-chain (tx: ${txId})`);
-        console.log(`   The service may need time to process. Data fetch failed.\n`);
-        notify(`⚠️ Paid for \`${endpoint}\` (tx: ${txId}) but data fetch failed: ${err.message}`);
-        return null;
+    notify([
+        `✅ *Paid for ${endpoint}*`,
+        `Amount: *${amountSTX.toFixed(4)} STX*`,
+        `TxID: \`${txId.toString().slice(0, 10)}...\``,
+        `Method: Escrow agent-pay (autonomous)`,
+    ].join("\n"));
+
+    return data;
+    } finally {
+        runningAgents.delete(agentAddress);
     }
 }
 
@@ -371,6 +501,16 @@ async function runAllServices() {
         }
     }
 
+    // Heartbeat pulse for UI active status
+    const HEARTBEAT_SECRET = process.env.HEARTBEAT_SECRET || "kova-demo-secret";
+    try {
+        await fetch(`http://localhost:${AGENT_API_PORT}/api/agent-heartbeat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ agent: agentAddress, secret: HEARTBEAT_SECRET })
+        });
+    } catch {}
+
     return results;
 }
 
@@ -401,13 +541,38 @@ function startApiServer() {
     apiServer.post("/api/create-agent", async (req, res) => {
         try {
             const label = req.body.label || `Agent ${derivedAgents.length + 1}`;
-            const result = await deriveAgentAtIndex(nextAgentIndex);
+            const requestedIndex = req.body.index;
+            const useIndex = (requestedIndex !== undefined && requestedIndex !== null) ? parseInt(requestedIndex) : nextAgentIndex;
+
+            const result = await deriveAgentAtIndex(useIndex);
             derivedAgents.push({ ...result, label });
-            console.log(`🔑 New agent created: ${result.address} (index ${result.index})`);
-            nextAgentIndex++;
+            
+            if (useIndex >= nextAgentIndex) {
+                nextAgentIndex = useIndex + 1;
+            } else {
+                nextAgentIndex++;
+            }
             res.json({ address: result.address, index: result.index, label });
         } catch (err) {
             res.status(500).json({ error: err.message });
+        }
+    });
+
+    // ─── Phase 7 APIs: Nonces & Audit Logs ───
+    apiServer.get("/api/nonce", (req, res) => {
+        import("crypto").then(crypto => {
+            const nonce = crypto.randomBytes(16).toString('hex');
+            res.json({ nonce });
+        }).catch(() => res.json({ nonce: Date.now().toString() }));
+    });
+
+    apiServer.post("/api/audit-log", (req, res) => {
+        try {
+            const entry = { timestamp: new Date().toISOString(), ...req.body };
+            fs.appendFileSync("audit.log", JSON.stringify(entry) + "\n");
+            res.json({ success: true });
+        } catch (err) {
+            res.status(500).json({ error: "Failed to write audit log" });
         }
     });
 
@@ -447,8 +612,348 @@ function startApiServer() {
         res.json({ address: agentAddress, index: activeAgentIndex });
     });
 
+    // ─── Update Settings dynamically ───
+    apiServer.post("/api/settings", async (req, res) => {
+        const { mode, intervalValue, serviceEndpoints, agentIndex } = req.body;
+        if (mode) SCHEDULE_MODE = mode;
+        if (intervalValue) SCHEDULE_INTERVAL = parseInt(intervalValue);
+        if (serviceEndpoints) {
+            SERVICE_ENDPOINTS = serviceEndpoints.split(",").map(s => s.trim()).filter(Boolean);
+        }
+        
+        if (agentIndex !== undefined && agentIndex !== null) {
+            const targetIndex = parseInt(agentIndex);
+            if (targetIndex !== activeAgentIndex) {
+                const mnemonic = process.env.AGENT_MNEMONIC;
+                if (mnemonic) {
+                    try {
+                        let wallet = await generateWallet({ secretKey: mnemonic, password: "" });
+                        while (wallet.accounts.length <= targetIndex) {
+                            wallet = generateNewAccount(wallet);
+                        }
+                        const account = wallet.accounts[targetIndex];
+                        AGENT_KEY = account.stxPrivateKey;
+                        agentAddress = getAddressFromPrivateKey(AGENT_KEY, STACKS_TESTNET);
+                        activeAgentIndex = targetIndex;
+                        console.log(`\n🔄 Switched active agent → ${agentAddress} (index ${targetIndex})`);
+                    } catch (err) {
+                        console.error("Failed to switch agent key:", err);
+                    }
+                }
+            }
+        }
+
+        // Accept ownerAddress from UI (the connected Leather wallet)
+        const { ownerAddress } = req.body;
+        if (ownerAddress && ownerAddress !== OWNER) {
+            OWNER = ownerAddress;
+            console.log(`👤 Switched owner → ${OWNER}`);
+        }
+        
+        console.log(`\n⚙️  Settings updated via UI`);
+        applySchedule();
+        res.json({ status: "ok", mode: SCHEDULE_MODE, interval: SCHEDULE_INTERVAL, endpoints: SERVICE_ENDPOINTS });
+    });
+
+    // ─── Settle Escrow (x402 operator settlement endpoint) ───
+    // Agent process or external x402 client calls this to request operator-signed settlement.
+    // Flow per sequence diagram:
+    //   1. validate-spend (read-only on-chain)
+    //   2. Telegram approval (if bot active and amount exceeds threshold)
+    //   3. agent-pay (operator signs and broadcasts)
+    //   4. Return payment-response
+    apiServer.post("/api/settle-escrow", async (req, res) => {
+        try {
+            const { owner, agent, service, amount } = req.body;
+            if (!owner || !agent || !service || !amount) {
+                return res.status(400).json({ error: "Missing params: owner, agent, service, amount" });
+            }
+
+            const amountInt = parseInt(amount);
+            const amountSTX = amountInt / 1_000_000;
+            const serviceName = service.slice(0, 10) + "..." + service.slice(-6);
+
+            console.log(`\n🔄 Settle-escrow request: ${amountSTX.toFixed(4)} STX → ${serviceName}`);
+
+            // 1. Validate rules on-chain first
+            console.log(`   📜 Validating rules on-chain...`);
+            const result = await fetchCallReadOnlyFunction({
+                contractAddress: CONTRACT,
+                contractName: "agent-wallet-v4",
+                functionName: "validate-spend",
+                functionArgs: [
+                    standardPrincipalCV(owner),
+                    standardPrincipalCV(agent),
+                    standardPrincipalCV(service),
+                    uintCV(amountInt),
+                ],
+                network: STACKS_TESTNET,
+                senderAddress: operatorAddress,
+            });
+            const json = cvToJSON(result);
+            if (!json.success) {
+                console.log(`   ❌ Rules check failed: ${JSON.stringify(json)}`);
+                return res.status(400).json({ error: "Rules check failed", details: json });
+            }
+            console.log(`   ✅ Rules check passed`);
+
+            // 2. Telegram approval (if bot is active)
+            if (isBotActive()) {
+                console.log(`   📱 Checking Telegram approval (${amountSTX.toFixed(4)} STX)...`);
+                const approved = await requestApproval(
+                    amountInt,
+                    serviceName,
+                    service
+                );
+                if (!approved) {
+                    console.log(`   ❌ Payment REJECTED by owner via Telegram`);
+                    notify(`❌ Settlement *rejected*: ${amountSTX.toFixed(4)} STX → \`${serviceName}\``);
+                    return res.status(403).json({
+                        error: "Payment rejected by owner",
+                        reason: "telegram_rejected",
+                    });
+                }
+                console.log(`   ✅ Telegram approved`);
+            }
+
+            // 3. Operator signs and broadcasts agent-pay
+            console.log(`   💳 Operator signing agent-pay...`);
+            const txOptions = {
+                contractAddress: CONTRACT,
+                contractName: "agent-wallet-v4",
+                functionName: "agent-pay",
+                functionArgs: [
+                    standardPrincipalCV(owner),
+                    standardPrincipalCV(agent),
+                    standardPrincipalCV(service),
+                    uintCV(amountInt),
+                ],
+                senderKey: OPERATOR_KEY,
+                network: STACKS_TESTNET,
+                anchorMode: AnchorMode.Any,
+                postConditionMode: PostConditionMode.Allow,
+                fee: 5000n,
+            };
+            const tx = await makeContractCall(txOptions);
+            const broadcastResult = await broadcastTransaction({ transaction: tx, network: STACKS_TESTNET });
+            if (broadcastResult.error) {
+                console.error(`   ❌ agent-pay broadcast failed: ${broadcastResult.error}`);
+                return res.status(500).json({ error: "Broadcast failed", details: broadcastResult.error });
+            }
+
+            const txId = `0x${broadcastResult.txid}`;
+            console.log(`   ✅ agent-pay settled: ${txId}`);
+
+            // Notify via Telegram
+            notify([
+                `✅ *Settlement complete*`,
+                `Amount: *${amountSTX.toFixed(4)} STX*`,
+                `Service: \`${serviceName}\``,
+                `TxID: \`${txId.slice(0, 12)}...\``,
+                `Payer: operator`,
+            ].join("\n"));
+
+            // 4. Return x402-compatible payment-response
+            res.json({
+                success: true,
+                transaction: txId,
+                payer: operatorAddress,
+                network: "stacks:2147483648",
+                scheme: "escrow",
+            });
+        } catch (err) {
+            console.error(`   ❌ settle-escrow error: ${err.message}`);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // ─── Phase 4 APIs: Info, Activity, Config, Heartbeats ───
+    apiServer.get("/api/operator-info", (req, res) => {
+        res.json({
+            operatorAddress,
+            agentAddress,
+            isOperatorSeparate: OPERATOR_KEY !== AGENT_KEY,
+        });
+    });
+
+    apiServer.get("/api/activity", async (req, res) => {
+        try {
+            const { owner, agent, limit = 20, offset = 0 } = req.query;
+            if (!owner) return res.status(400).json({ error: "owner missing" });
+            
+            let requestedAgents = [];
+            if (agent && agent !== "ALL") {
+                requestedAgents.push(agent);
+            } else {
+                requestedAgents = derivedAgents.map(a => a.address);
+                if (agentAddress && !requestedAgents.includes(agentAddress)) requestedAgents.push(agentAddress);
+            }
+
+            const allRecords = [];
+            let totalCount = 0;
+
+            for (const addr of requestedAgents) {
+                try {
+                    const nonceResult = await fetchCallReadOnlyFunction({
+                        contractAddress: CONTRACT,
+                        contractName: "agent-wallet-v4",
+                        functionName: "get-spend-nonce",
+                        functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(addr)],
+                        network: STACKS_TESTNET,
+                        senderAddress: operatorAddress,
+                    });
+                    const nonceJson = cvToJSON(nonceResult);
+                    const nonceInt = parseInt(nonceJson?.value?.value || nonceJson?.value || 0);
+
+                    totalCount += nonceInt;
+
+                    const start = Math.max(0, nonceInt - (parseInt(offset) + parseInt(limit)));
+                    for (let i = nonceInt - 1; i >= start; i--) {
+                        try {
+                            const recResult = await fetchCallReadOnlyFunction({
+                                contractAddress: CONTRACT,
+                                contractName: "agent-wallet-v4",
+                                functionName: "get-spend-record",
+                                functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(addr), uintCV(i)],
+                                network: STACKS_TESTNET,
+                                senderAddress: operatorAddress,
+                            });
+                            const rJson = cvToJSON(recResult);
+                            if (rJson?.value?.value) {
+                                const v = rJson.value.value;
+                                allRecords.push({
+                                    nonce: i,
+                                    agent: v.agent.value,
+                                    service: v.service.value,
+                                    amount: parseInt(v.amount.value),
+                                    block: parseInt(v.block.value),
+                                });
+                            }
+                        } catch (e) { }
+                    }
+                } catch (e) { }
+            }
+            allRecords.sort((a,b) => b.block - a.block || b.nonce - a.nonce);
+            const slicedRecords = allRecords.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+            res.json({ totalCount, records: slicedRecords });
+        } catch (err) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    const usedNonces = new Set();
+    const rateLimits = new Map();
+
+    apiServer.post("/api/save-telegram-config", async (req, res) => {
+        const ip = req.ip || "unknown";
+        const now = Date.now();
+        const limits = rateLimits.get(ip) || { count: 0, time: now };
+        if (now - limits.time > 60000) { limits.count = 0; limits.time = now; } // 1 minute window
+        if (limits.count >= 10) return res.status(429).json({ error: "Too many requests" });
+        limits.count++;
+        rateLimits.set(ip, limits);
+
+        try {
+            const { owner, botToken, chatId, thresholdSTX, nonce, publicKey, signature } = req.body;
+            
+            if (!owner || !publicKey || !signature || !nonce) {
+                return res.status(400).json({ error: "Missing signature payload for authentication." });
+            }
+
+            if (usedNonces.has(nonce)) {
+                return res.status(401).json({ error: "Nonce already used. Replay detected." });
+            }
+
+            // Verify signature using @stacks/encryption
+            const message = `kova:link-telegram:${owner}:${nonce}`;
+            const isValid = verifyMessageSignature({
+                message,
+                signature,
+                publicKey
+            });
+
+            if (!isValid) {
+                console.error("❌ Invalid authorization signature for Telegram config.");
+                return res.status(401).json({ error: "Invalid signature payload." });
+            }
+
+            const derivedAddress = stxTx.getAddressFromPublicKey(publicKey, STACKS_TESTNET);
+            if (derivedAddress !== owner) {
+                return res.status(401).json({ error: "Signer address does not match owner profile." });
+            }
+
+            await initBot(botToken, chatId, parseFloat(thresholdSTX || "0.05"));
+            appState.telegram = { botToken, chatId, thresholdSTX: parseFloat(thresholdSTX || "0.05") };
+            saveState();
+
+            usedNonces.add(nonce);
+            if (usedNonces.size > 1000) usedNonces.clear(); // TTL basic cleanup
+
+            console.log(`\n⚙️  Telegram config updated via UI (Threshold: ${thresholdSTX} STX)`);
+            res.json({ success: true });
+        } catch (err) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    const agentHeartbeats = new Map();
+    const HEARTBEAT_SECRET = process.env.HEARTBEAT_SECRET || "kova-demo-secret";
+
+    apiServer.post("/api/agent-heartbeat", (req, res) => {
+        const ip = req.ip || "unknown";
+        const now = Date.now();
+        const limits = rateLimits.get(ip) || { count: 0, time: now };
+        if (now - limits.time > 60000) { limits.count = 0; limits.time = now; } // 1 minute window
+        if (limits.count >= 60) return res.status(429).json({ error: "Too many requests" });
+        limits.count++;
+        rateLimits.set(ip, limits);
+
+        const { agent, secret } = req.body;
+        if (secret !== HEARTBEAT_SECRET) {
+            return res.status(401).json({ error: "Unauthorized heartbeat" });
+        }
+        if (agent) {
+            agentHeartbeats.set(agent, Date.now());
+        }
+        res.json({ success: true });
+    });
+
+    apiServer.get("/api/agent-status", async (req, res) => {
+        try {
+            const { owner, agent } = req.query;
+            if (!agent) return res.status(400).json({ error: "agent missing" });
+
+            const lastSeen = agentHeartbeats.get(agent) || 0;
+            const running = runningAgents.has(agent); // Expose pipeline lock status
+            let onChainActive = true;
+            if (owner) {
+                try {
+                    const result = await fetchCallReadOnlyFunction({
+                        contractAddress: CONTRACT,
+                        contractName: "agent-wallet-v4",
+                        functionName: "get-wallet",
+                        functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(agent)],
+                        network: STACKS_TESTNET,
+                        senderAddress: operatorAddress,
+                    });
+                    const json = cvToJSON(result);
+                    if (json?.value?.value?.active !== undefined) {
+                        onChainActive = json.value.value.active.value === true;
+                    }
+                } catch (e) {
+                    // ignore mapping error
+                }
+            }
+            res.json({ lastSeen, running, onChainActive });
+        } catch (err) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
     apiServer.listen(AGENT_API_PORT, () => {
         console.log(`  🌐 Agent API running → http://localhost:${AGENT_API_PORT}/api/latest`);
+        console.log(`  🔄 Settle endpoint → POST http://localhost:${AGENT_API_PORT}/api/settle-escrow`);
+        console.log(`  🔑 Operator info  → GET  http://localhost:${AGENT_API_PORT}/api/operator-info`);
         console.log(`  💡 Any app can fetch latest results from this URL\n`);
     });
 }
@@ -478,39 +983,29 @@ derivedAgents.push({ address: agentAddress, index: parseInt(process.env.AGENT_AC
 // (user's wallet may occupy indexes 0, 1, 2, 3 — agent starts at index+2)
 nextAgentIndex = parseInt(process.env.AGENT_ACCOUNT_INDEX || "0") + 2;
 
-// ─── Main: Scheduler ────────────────────────────────
-async function main() {
+let currentIntervalId = null;
+
+function applySchedule() {
+    if (currentIntervalId) {
+        clearInterval(currentIntervalId);
+        currentIntervalId = null;
+    }
+
     console.log(`\n📋 Schedule mode: ${SCHEDULE_MODE}`);
     if (SCHEDULE_MODE === "interval") {
         console.log(`⏱️  Interval: every ${SCHEDULE_INTERVAL} minute(s)`);
     }
     console.log(`📡 Endpoints: ${SERVICE_ENDPOINTS.join(", ")}`);
-    console.log(`📤 Delivery: ${DELIVERY_MODE}${DELIVERY_MODE === "webhook" || DELIVERY_MODE === "both" ? ` → ${WEBHOOK_URL}` : ""}\n`);
-
-    // Start API server always (frontend needs /api/create-agent during setup)
-    startApiServer();
 
     if (SCHEDULE_MODE === "once") {
-        // ─── One-shot mode ───
-        await runAllServices();
-
+        runAllServices();
         if (isBotActive() || DELIVERY_MODE === "api" || DELIVERY_MODE === "both") {
-            console.log("📱 Agent is running. Press Ctrl+C to stop.\n");
-        } else {
-            // Keep alive for API server (frontend needs /api/create-agent)
-            console.log("🌐 API server running. Press Ctrl+C to stop.\n");
+            console.log("📱 Agent is waiting for schedules. Press Ctrl+C to stop.\n");
         }
-
     } else if (SCHEDULE_MODE === "interval") {
-        // ─── Loop mode: run every X minutes ───
         console.log(`🔄 Agent will run every ${SCHEDULE_INTERVAL} minute(s). Press Ctrl+C to stop.\n`);
-
-        // Run immediately on start
-        await runAllServices();
-
-        // Then schedule
         const intervalMs = SCHEDULE_INTERVAL * 60 * 1000;
-        setInterval(async () => {
+        currentIntervalId = setInterval(async () => {
             try {
                 await runAllServices();
             } catch (err) {
@@ -518,6 +1013,18 @@ async function main() {
                 notify(`❌ Scheduled agent run *failed*: ${err.message}`);
             }
         }, intervalMs);
+    }
+}
+
+// ─── Main: Scheduler ────────────────────────────────
+async function main() {
+    console.log(`📤 Delivery: ${DELIVERY_MODE}${DELIVERY_MODE === "webhook" || DELIVERY_MODE === "both" ? ` → ${WEBHOOK_URL}` : ""}\n`);
+
+    // Start API server always (frontend needs /api/create-agent during setup)
+    startApiServer();
+
+    if (SCHEDULE_MODE === "once" || SCHEDULE_MODE === "interval") {
+        applySchedule();
 
     } else if (SCHEDULE_MODE === "pipeline") {
         // ─── Pipeline mode: execute multi-step workflow ───

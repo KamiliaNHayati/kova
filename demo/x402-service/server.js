@@ -10,7 +10,8 @@ app.use(express.json());
 
 // ─── Config ──────────────────────────────────────────
 const PORT = 3402;
-const SERVICE_ADDRESS = process.env.SERVICE_ADDRESS || "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37";
+// Use Index 4 purely as the Service address
+const SERVICE_ADDRESS = process.env.SERVICE_ADDRESS || "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663";
 const FACILITATOR_URL = process.env.FACILITATOR_URL || "https://x402-facilitator.onrender.com";
 
 // ─── API Endpoints ───────────────────────────────────
@@ -112,6 +113,27 @@ app.get("/.well-known/x402", (req, res) => {
     });
 });
 
+// Helper to confirm payment tx status natively 
+app.get("/paid-status", async (req, res) => {
+    const txid = req.query.txid;
+    if (!txid) return res.status(400).json({ error: "txid required" });
+
+    try {
+        const fetchUrl = `https://api.testnet.hiro.so/extended/v1/tx/${txid}`;
+        const response = await fetch(fetchUrl);
+        if (response.status === 200) {
+            const data = await response.json();
+            // In mempool ("pending") or already confirmed ("success")
+            if (data.tx_status === "pending" || data.tx_status === "success" || data.tx_status === "success_anchor_block") {
+                return res.json({ paid: true, status: data.tx_status });
+            }
+        }
+        res.json({ paid: false, status: "not_found" });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to verify transaction natively" });
+    }
+});
+
 // ─── Start ───────────────────────────────────────────
 app.listen(PORT, () => {
     console.log(`\n🔒 Kova X402 Service running on http://localhost:${PORT}`);
@@ -121,5 +143,6 @@ app.listen(PORT, () => {
     console.log(`   GET /health                     — Free health check`);
     console.log(`   GET /api/price-feed              — 0.5 STX (x402)`);
     console.log(`   GET /api/summarize?text=...      — 1.0 STX (x402)`);
-    console.log(`   GET /.well-known/x402            — Service discovery\n`);
+    console.log(`   GET /.well-known/x402            — Service discovery`);
+    console.log(`   GET /paid-status?txid=...        — Verify tx state\n`);
 });

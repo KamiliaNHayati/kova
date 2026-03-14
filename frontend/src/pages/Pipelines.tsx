@@ -16,7 +16,11 @@ import {
     Package,
     Zap,
     Settings2,
+    Clock,
 } from "lucide-react";
+
+import { isServiceAllowed } from "../lib/contracts";
+import { getSavedAgents } from "../lib/agentKeys";
 
 // ─── Types ───────────────────────────────────────────
 interface PipelineStep {
@@ -48,6 +52,7 @@ interface Pipeline {
     steps: PipelineStep[];
     delivery: "terminal" | "webhook" | "api";
     webhookUrl?: string;
+    scheduleInterval?: number;
     createdAt: string;
 }
 
@@ -108,6 +113,7 @@ export default function Pipelines() {
     const [steps, setSteps] = useState<PipelineStep[]>([]);
     const [delivery, setDelivery] = useState<"terminal" | "webhook" | "api">("terminal");
     const [webhookUrl, setWebhookUrl] = useState("");
+    const [scheduleInterval, setScheduleInterval] = useState<number | undefined>(undefined);
 
     // Marketplace services
     const [marketServices, setMarketServices] = useState<MarketService[]>([]);
@@ -120,8 +126,25 @@ export default function Pipelines() {
     async function loadMarketplaceServices() {
         if (!address) return;
         setLoadingMarket(true);
-        // Use hardcoded services for the demo — in production, fetch from on-chain registry
-        setMarketServices(HARDCODED_MARKETPLACE);
+        const agents = getSavedAgents(address);
+        const allowedServices: MarketService[] = [];
+
+        for (const svc of HARDCODED_MARKETPLACE) {
+            let isAllowedByAnyAgent = false;
+            for (const agent of agents) {
+                try {
+                    const resp = await isServiceAllowed(address, agent.address, svc.ownerAddress);
+                    if (resp.value === true) {
+                        isAllowedByAnyAgent = true;
+                        break;
+                    }
+                } catch { }
+            }
+            if (isAllowedByAnyAgent) {
+                allowedServices.push(svc);
+            }
+        }
+        setMarketServices(allowedServices);
         setLoadingMarket(false);
     }
 
@@ -182,6 +205,7 @@ export default function Pipelines() {
             steps,
             delivery,
             webhookUrl: delivery === "webhook" ? webhookUrl : undefined,
+            scheduleInterval,
             createdAt: new Date().toISOString(),
         };
 
@@ -194,6 +218,7 @@ export default function Pipelines() {
         setSteps([]);
         setDelivery("terminal");
         setWebhookUrl("");
+        setScheduleInterval(undefined);
         setShowBuilder(false);
     }
 
@@ -259,6 +284,26 @@ export default function Pipelines() {
                             className="w-full px-4 py-3 bg-black/30 border border-border/50 rounded-xl text-white placeholder-text-muted/50 focus:border-accent focus:outline-none"
                             maxLength={50}
                         />
+                    </div>
+
+                    {/* Schedule */}
+                    <div>
+                        <label className="block text-sm text-text-muted mb-1.5 flex items-center gap-1">
+                            <Clock className="w-4 h-4" />
+                            Schedule (Optional)
+                        </label>
+                        <select
+                            value={scheduleInterval || ""}
+                            onChange={(e) => setScheduleInterval(e.target.value ? parseInt(e.target.value) : undefined)}
+                            className="w-full px-4 py-3 bg-black/30 border border-border/50 rounded-xl text-white focus:border-accent focus:outline-none appearance-none"
+                        >
+                            <option value="">Run Once Manually</option>
+                            <option value="5">Every 5 minutes</option>
+                            <option value="15">Every 15 minutes</option>
+                            <option value="30">Every 30 minutes</option>
+                            <option value="60">Every 1 hour</option>
+                            <option value="1440">Every 24 hours</option>
+                        </select>
                     </div>
 
                     {/* Steps */}

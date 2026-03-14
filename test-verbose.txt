@@ -1,0 +1,53 @@
+﻿
+[1m[46m RUN [49m[22m [36mv3.2.4 [39m[90mC:/Users/moeew/OneDrive/Dokumen/Hackathon/stacks-btc/kova[39m
+
+node.exe : 
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m[1m[41m 
+Unhandled Errors 
+[49m[22m[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m
+At C:\Program Files\nodejs\npx.ps1:29 char:3
++   & $NODE_EXE $NPX_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: 
+    ([31mΓÄ»ΓÄ»ΓÄ»Γ...»ΓÄ»ΓÄ»ΓÄ»[39m:Str  
+  ing) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommand 
+   Error
+ 
+[31m[1m
+Vitest caught 1 unhandled error during the 
+test run.
+This might cause false positive tests. 
+Resolve unhandled errors to make sure your 
+tests are not affected.[22m[39m
+
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m[1m[41m 
+Unhandled Error 
+[49m[22m[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m
+[31m[1mUnknown Error[22m: error: 
+unsupported line-ending '\r', only '\n' is 
+supported
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:1:73
+;; Kova Agent Wallet v3 - Per-Agent Escrow 
++ Operator-Paid x402 Payments
+                                            
+                            ^
+note:: you may need to change your editor 
+from CRLF mode to LF mode
+;; Kova Agent Wallet v3 - Per-Agent Escrow 
++ Operator-Paid x402 Payments
+                                            
+                            ^[39m
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ
+»ΓÄ»ΓÄ»[39m
+
+
+[2m Test Files [22m [90m (4)[39m
+[2m      Tests [22m [2mno tests[22m
+[2m     Errors [22m [1m[31m1 error[39m[22m
+[2m   Start at [22m 02:17:11
+[2m   Duration [22m 1.84s[2m (transform 20ms, setup 0ms, collect 0ms, tests 0ms, environment 0ms, prepare 0ms)[22m
+

@@ -7,8 +7,9 @@ import {
   setLimits,
   deposit,
   withdraw,
-  addAgent,
   removeAgent,
+  registerOperator,
+  getOperator,
 } from "../lib/contracts";
 import {
   createAgentFromBackend,
@@ -34,6 +35,8 @@ import {
   EyeOff,
   Bot,
   ChevronDown,
+  Shield,
+  ShieldCheck,
 } from "lucide-react";
 
 // Validation helpers
@@ -59,6 +62,19 @@ export default function WalletSetup() {
   const [withdrawAmt, setWithdrawAmt] = useState("");
   const [withdrawError, setWithdrawError] = useState("");
 
+  const [agentStatuses, setAgentStatuses] = useState<Record<string, { lastSeen: number, onChainActive: boolean, running?: boolean }>>({});
+
+  async function pushAudit(action: string, details: any) {
+    if (!address) return;
+    try {
+      await fetch("http://localhost:4000/api/audit-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, owner: address, ...details })
+      });
+    } catch {}
+  }
+
   // Create wallet form
   const [generatedAgent, setGeneratedAgent] = useState<AgentKeypair | null>(null);
   const [dailyLimit, setDailyLimit] = useState("10");
@@ -76,6 +92,11 @@ export default function WalletSetup() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [showKeyFor, setShowKeyFor] = useState<string | null>(null);
 
+  // Operator state
+  const [operatorRegistered, setOperatorRegistered] = useState(false);
+  const [operatorAddress, setOperatorAddress] = useState<string | null>(null);
+  const [backendOperator, setBackendOperator] = useState<string | null>(null);
+
   const [txStatus, setTxStatus] = useState("");
   const [txError, setTxError] = useState("");
 
@@ -83,24 +104,60 @@ export default function WalletSetup() {
     if (!address) return;
     checkWallet();
     setSavedAgents(getSavedAgents(address));
+    fetchOperatorStatus();
   }, [address]);
 
-  // Auto-generate first agent on mount if no wallet
   useEffect(() => {
-    if (!loading && !hasWallet && !generatedAgent) {
+    let active = true;
+    async function fetchStatuses() {
+      if (!address || savedAgents.length === 0) return;
+      const statuses: Record<string, { lastSeen: number, onChainActive: boolean, running?: boolean }> = {};
+      for (const agent of savedAgents) {
+        try {
+          const resp = await fetch(`http://localhost:4000/api/agent-status?owner=${address}&agent=${agent.address}`);
+          if (resp.ok && active) {
+            statuses[agent.address] = await resp.json();
+          }
+        } catch {}
+      }
+      if (active && Object.keys(statuses).length > 0) {
+        setAgentStatuses(statuses);
+      }
+    }
+    fetchStatuses();
+    const interval = setInterval(fetchStatuses, 10000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [address, savedAgents]);
+
+  // Auto-generate first agent on mount if no local agents exist
+  useEffect(() => {
+    if (!loading && savedAgents.length === 0 && !generatedAgent) {
       createAgentFromBackend("Agent 1")
         .then((agent) => setGeneratedAgent(agent))
         .catch(() => setTxError("Backend not running. Start agent.js first."));
     }
-  }, [loading, hasWallet]);
+  }, [loading, savedAgents.length, generatedAgent]);
 
   async function checkWallet() {
     try {
-      const result = await getWallet(address!);
+      // v3: check if any agent has a wallet
+      const agents = getSavedAgents(address!);
+      if (agents.length === 0) {
+        setHasWallet(false);
+        setWalletData(null);
+        setLoading(false);
+        return;
+      }
+      // Check the first (or selected) agent's wallet
+      const agentAddr = agents[selectedAgentIdx]?.address || agents[0].address;
+      const result = await getWallet(address!, agentAddr);
       if (result && result.value !== null && result.value !== undefined) {
         setHasWallet(true);
         setWalletData(result.value);
-        const bal = await getBalance(address!);
+        const bal = await getBalance(address!, agentAddr);
         setEscrowBalance(bal?.value || 0);
       } else {
         setHasWallet(false);
@@ -113,6 +170,53 @@ export default function WalletSetup() {
     setLoading(false);
   }
 
+  async function fetchOperatorStatus() {
+    if (!address) return;
+    try {
+      // Check on-chain operator registration
+      const opResult = await getOperator(address);
+      if (opResult && opResult.value) {
+        setOperatorRegistered(true);
+        setOperatorAddress(opResult.value?.value?.operator?.value || null);
+      } else {
+        setOperatorRegistered(false);
+        setOperatorAddress(null);
+      }
+    } catch {
+      setOperatorRegistered(false);
+    }
+
+    try {
+      // Get backend operator address
+      const resp = await fetch("http://localhost:4000/api/operator-info");
+      const info = await resp.json();
+      setBackendOperator(info.operatorAddress || null);
+    } catch {
+      setBackendOperator(null);
+    }
+  }
+
+  function handleRegisterOperator() {
+    if (!backendOperator) {
+      setTxError("Backend not running. Start agent.js first to get operator address.");
+      return;
+    }
+    setTxError("");
+    setTxStatus("Confirm operator registration in your wallet...");
+    registerOperator(backendOperator, (data: any) => {
+      if (data && data.error) {
+        setTxError(`Register operator failed: ${data.error}`);
+        setTxStatus("");
+      } else {
+        setTxStatus("Operator registered! Your agent backend can now sign payments.");
+        setOperatorRegistered(true);
+        setOperatorAddress(backendOperator);
+        pushAudit("REGISTER_OPERATOR", { backendOperator });
+        setTimeout(() => fetchOperatorStatus(), 5000);
+      }
+    });
+  }
+
   function copyToClipboard(text: string, fieldId: string) {
     navigator.clipboard.writeText(text);
     setCopiedField(fieldId);
@@ -122,27 +226,49 @@ export default function WalletSetup() {
   function handleDeposit() {
     setDepositError("");
     setTxError("");
+    const agentAddr = savedAgents[selectedAgentIdx]?.address;
+    if (!agentAddr) { setTxError("No agent selected"); return; }
     const v = isValidAmount(depositAmt);
     if (!v.valid) { setDepositError(v.error!); return; }
     const amt = Math.floor(parseFloat(depositAmt) * 1_000_000);
     setTxStatus("Confirm deposit in your wallet...");
-    deposit(amt, (data) => {
+    // v3: deposit(agent, amount)
+    deposit(agentAddr, amt, (data) => {
       if (data && data.error) { setTxError(`Deposit failed: ${data.error}`); setTxStatus(""); }
-      else { setTxStatus("Deposited!"); setDepositAmt(""); setTimeout(() => checkWallet(), 3000); }
+      else { 
+        setTxStatus("Deposited!"); setDepositAmt(""); 
+        pushAudit("DEPOSIT", { agentAddr, amount: amt });
+        setTimeout(() => checkWallet(), 3000); 
+      }
     });
   }
 
   function handleWithdraw() {
     setWithdrawError("");
     setTxError("");
+    const agentAddr = savedAgents[selectedAgentIdx]?.address;
+    if (!agentAddr) { setTxError("No agent selected"); return; }
     const v = isValidAmount(withdrawAmt);
     if (!v.valid) { setWithdrawError(v.error!); return; }
     const amt = Math.floor(parseFloat(withdrawAmt) * 1_000_000);
     if (amt > escrowBalance) { setWithdrawError("Exceeds escrow balance"); return; }
+    
+    // UI Lock Check
+    const agentState = agentStatuses[agentAddr];
+    if (agentState && agentState.running) {
+        alert("⚠️ WARNING: This agent is actively paying for a service right now.\n\nWithdrawing your balance mid-flight may cause the transaction to fail and your data won't arrive. Please wait a few seconds before withdrawing.");
+        return;
+    }
+
     setTxStatus("Confirm withdrawal in your wallet...");
-    withdraw(amt, (data) => {
+    // v3: withdraw(agent, amount)
+    withdraw(agentAddr, amt, (data) => {
       if (data && data.error) { setTxError(`Withdraw failed: ${data.error}`); setTxStatus(""); }
-      else { setTxStatus("Withdrawn!"); setWithdrawAmt(""); setTimeout(() => checkWallet(), 3000); }
+      else { 
+        setTxStatus("Withdrawn!"); setWithdrawAmt(""); 
+        pushAudit("WITHDRAW", { agentAddr, amount: amt });
+        setTimeout(() => checkWallet(), 3000); 
+      }
     });
   }
 
@@ -151,8 +277,9 @@ export default function WalletSetup() {
     setPerCallError("");
     setTxError("");
 
-    if (!generatedAgent) {
-      setTxError("No agent generated. Refresh the page.");
+    const targetAgent = generatedAgent || savedAgents[selectedAgentIdx];
+    if (!targetAgent) {
+      setTxError("No agent found. Refresh the page.");
       return;
     }
 
@@ -166,28 +293,33 @@ export default function WalletSetup() {
     if (perCall > daily) { setPerCallError("Per-call limit cannot exceed daily limit"); return; }
 
     setTxStatus("Confirm in your wallet...");
-    createWallet(generatedAgent.address, daily, perCall, async (data) => {
+    createWallet(targetAgent.address, daily, perCall, async (data) => {
       if (data && data.error) {
         setTxError(`Transaction failed: ${data.error}`);
         setTxStatus("");
       } else {
-        // Save agent keypair to localStorage
-        saveAgent(address!, generatedAgent);
-        setSavedAgents(getSavedAgents(address!));
+        // Save agent keypair to localStorage if it's new
+        if (generatedAgent) {
+          saveAgent(address!, generatedAgent);
+          setSavedAgents(getSavedAgents(address!));
+        }
 
         // Tell backend to switch to this agent's index
-        if (generatedAgent.index !== undefined) {
+        if (targetAgent.index !== undefined) {
           try {
             await fetch("http://localhost:4000/api/activate-agent", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ index: generatedAgent.index }),
+              body: JSON.stringify({ index: targetAgent.index }),
             });
           } catch { /* backend may not be running */ }
         }
 
-        setTxStatus("Wallet created! Your agent is ready.");
-        setTimeout(() => checkWallet(), 3000);
+        pushAudit("CREATE_WALLET", { agentAddr: targetAgent.address, dailyLimit: daily, perCallLimit: perCall });
+        
+        setTxStatus("Wallet creation submitted! Waiting for testnet confirmation... This may take several minutes.");
+        setGeneratedAgent(null);
+        setTimeout(() => checkWallet(), 5000);
       }
     });
   }
@@ -207,12 +339,16 @@ export default function WalletSetup() {
     if (perCall > daily) { setNewPerCallError("Per-call limit cannot exceed daily limit"); return; }
 
     setTxStatus("Confirm in your wallet...");
-    setLimits(daily, perCall, (data) => {
+    // v3: setLimits(agent, daily, perCall)
+    const agentAddr = savedAgents[selectedAgentIdx]?.address;
+    if (!agentAddr) { setTxError("No agent selected"); return; }
+    setLimits(agentAddr, daily, perCall, (data) => {
       if (data && data.error) {
         setTxError(`Update failed: ${data.error}`);
         setTxStatus("");
       } else {
         setTxStatus("Limits updated!");
+        pushAudit("SET_LIMITS", { agentAddr, dailyLimit: daily, perCallLimit: perCall });
         setNewDailyLimit("");
         setNewPerCallLimit("");
       }
@@ -228,10 +364,14 @@ export default function WalletSetup() {
 
     setTxStatus("Generating agent from backend...");
     try {
-      const agent = await createAgentFromBackend(`Agent ${savedAgents.length + 1}`);
+      const nextIdx = savedAgents.length > 0 
+        ? Math.max(...savedAgents.map(a => a.index !== undefined ? a.index : -1)) + 1 
+        : undefined; // Backend will default to .env + 2 if it's the very first agent
+      const agent = await createAgentFromBackend(`Agent ${savedAgents.length + 1}`, nextIdx);
 
       setTxStatus("Confirm in your wallet...");
-      addAgent(agent.address, (data) => {
+      // v3: createWallet creates an isolated wallet per agent
+      createWallet(agent.address, Math.floor(10 * 1_000_000), Math.floor(1 * 1_000_000), (data) => {
         if (data && data.error) {
           setTxError(`Add agent failed: ${data.error}`);
           setTxStatus("");
@@ -301,20 +441,22 @@ export default function WalletSetup() {
           <Card title="Create Agent Wallet" icon={<Plus className="w-5 h-5" />}>
             <div className="space-y-5">
               {/* Auto-generated agent */}
-              <div className="p-4 rounded-xl bg-success/5 border border-success/10">
+              <div className="p-4 rounded-xl bg-surface border border-border/50">
                 <div className="flex items-center gap-2 mb-3">
-                  <Zap className="w-4 h-4 text-success" />
-                  <span className="text-sm font-medium text-success">Agent Auto-Generated</span>
+                  <Zap className="w-4 h-4 text-warning" />
+                  <span className="text-sm font-medium text-warning">
+                    {savedAgents.length > 0 ? "Pending Agent Wallet" : "Agent Auto-Generated"}
+                  </span>
                 </div>
-                {generatedAgent && (
+                {(generatedAgent || savedAgents[selectedAgentIdx]) && (
                   <div className="space-y-3">
                     <div>
                       <label className="block text-[10px] text-text-muted uppercase mb-1">Agent Address</label>
                       <div
-                        onClick={() => copyToClipboard(generatedAgent.address, "create-addr")}
+                        onClick={() => copyToClipboard((generatedAgent || savedAgents[selectedAgentIdx]).address, "create-addr")}
                         className="flex items-center justify-between px-3 py-2.5 bg-black/30 border border-border/40 rounded-lg cursor-pointer hover:border-success/40 transition-all group"
                       >
-                        <span className="font-mono text-xs text-white truncate flex-1">{generatedAgent.address}</span>
+                        <span className="font-mono text-xs text-white truncate flex-1">{(generatedAgent || savedAgents[selectedAgentIdx]).address}</span>
                         {copiedField === "create-addr" ? (
                           <CheckCircle2 className="w-3.5 h-3.5 text-success ml-2 flex-shrink-0" />
                         ) : (
@@ -323,8 +465,15 @@ export default function WalletSetup() {
                       </div>
                     </div>
                     <p className="text-[10px] text-text-muted mt-2 flex items-center gap-1">
-                      <Key className="w-3 h-3 text-warning" /> Keys are securely managed by Kova Backend via KMS.
+                      <Key className="w-3 h-3 text-warning" /> Keys securely managed by Kova Backend via KMS.
                     </p>
+                    {savedAgents.length > 0 && (
+                      <div className="p-2.5 rounded-lg bg-warning/10 border border-warning/20">
+                        <p className="text-xs text-warning/90 leading-relaxed">
+                          ⚠️ This agent identity exists locally, but the on-chain wallet hasn't been confirmed yet. If you already submitted a transaction to create it, please wait for testnet confirmation. Otherwise, submit creation now.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -498,7 +647,7 @@ export default function WalletSetup() {
             className="hover:border-warning/30 transition-colors"
           >
             <p className="text-sm text-text-muted mb-4">
-              Authorize up to 5 agents. Kova auto-generates keypairs — copy the private key to each agent's .env file.
+              Agents are logical identities. Kova executes payments on your behalf via registered operator — private keys are not required for agents. Authorize up to 5 agents.
             </p>
 
             {/* Agent list */}
@@ -512,6 +661,11 @@ export default function WalletSetup() {
                           {i + 1}
                         </span>
                         <span className="text-sm font-medium text-white">{agent.label}</span>
+                        {agentStatuses[agent.address] && (
+                          <div className="flex items-center ml-1" title={agentStatuses[agent.address].lastSeen > Date.now() - 300000 ? "Agent Active (Heartbeat recent)" : "Agent Offline (No recent heartbeat)"}>
+                            <div className={`w-2 h-2 rounded-full ${agentStatuses[agent.address].onChainActive && agentStatuses[agent.address].lastSeen > Date.now() - 300000 ? 'bg-success shadow-[0_0_8px_rgba(34,197,94,0.6)]' : agentStatuses[agent.address].onChainActive ? 'bg-warning shadow-[0_0_8px_rgba(234,179,8,0.6)]' : 'bg-danger shadow-[0_0_8px_rgba(239,68,68,0.6)]'}`} />
+                          </div>
+                        )}
                       </div>
                       <button
                         onClick={() => handleRemoveAgent(agent.address)}
@@ -566,6 +720,85 @@ export default function WalletSetup() {
                 <strong className="text-warning">Production:</strong> use KMS/HSM for secure key management.
               </span>
             </div>
+          </Card>
+
+          {/* Operator Setup — one-time registration */}
+          <Card
+            title="Operator Setup"
+            icon={operatorRegistered ? <ShieldCheck className="w-5 h-5 text-success" /> : <Shield className="w-5 h-5 text-accent" />}
+            className={operatorRegistered ? "border-success/20 ring-1 ring-success/10" : "hover:border-accent/30 transition-colors"}
+          >
+            {operatorRegistered ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-success/10 border border-success/20">
+                  <ShieldCheck className="w-5 h-5 text-success flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-success">Operator Active</p>
+                    <p className="text-xs text-text-muted mt-0.5">Your backend can autonomously sign payments.</p>
+                  </div>
+                </div>
+                {operatorAddress && (
+                  <div>
+                    <label className="block text-[10px] text-text-muted uppercase mb-1">Operator Address</label>
+                    <div
+                      onClick={() => copyToClipboard(operatorAddress, "op-addr")}
+                      className="flex items-center justify-between px-3 py-2.5 bg-black/30 border border-border/40 rounded-lg cursor-pointer hover:border-success/40 transition-all group"
+                    >
+                      <span className="font-mono text-xs text-white truncate flex-1">{operatorAddress}</span>
+                      {copiedField === "op-addr" ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-success ml-2 flex-shrink-0" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5 text-text-muted group-hover:text-success ml-2 flex-shrink-0 transition-colors" />
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm text-text-muted leading-relaxed">
+                  Authorize Kova Backend (one-time). Register your backend as the operator. This allows it to sign <code className="text-xs px-1.5 py-0.5 bg-black/30 rounded text-accent">agent-pay</code> and pay gas on behalf of your agents.
+                </p>
+
+                {backendOperator ? (
+                  <div>
+                    <label className="block text-[10px] text-text-muted uppercase mb-1">Backend Operator Address</label>
+                    <div className="px-3 py-2.5 bg-black/30 border border-border/40 rounded-lg">
+                      <span className="font-mono text-xs text-white">{backendOperator}</span>
+                    </div>
+                    <p className="text-[10px] text-text-muted mt-1.5">
+                      This address was auto-detected from your running backend.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-warning/10 border border-warning/20">
+                    <p className="text-xs text-warning/90">
+                      ⚠️ Backend not reachable. Start <code className="px-1 py-0.5 bg-black/20 rounded">agent.js</code> first, then refresh.
+                    </p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleRegisterOperator}
+                  disabled={!backendOperator}
+                  className={`w-full px-4 py-3.5 font-semibold rounded-xl transition-all flex items-center justify-center gap-2 ${
+                    backendOperator
+                      ? "bg-accent hover:bg-accent-hover text-white hover:shadow-[0_0_20px_rgba(99,102,241,0.3)] hover:scale-[1.01]"
+                      : "bg-white/5 text-text-muted cursor-not-allowed"
+                  }`}
+                >
+                  <Shield className="w-4 h-4" />
+                  Register Operator On-Chain
+                </button>
+
+                <div className="p-3 rounded-lg bg-accent/5 border border-accent/10 text-[10px] text-text-muted flex items-start gap-2">
+                  <Info className="w-3 h-3 text-accent mt-0.5 flex-shrink-0" />
+                  <span>
+                    One-time setup. After registering, the operator can autonomously settle payments without your approval (unless Telegram guard is enabled).
+                  </span>
+                </div>
+              </div>
+            )}
           </Card>
         </div>
       )}

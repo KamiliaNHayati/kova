@@ -20,7 +20,6 @@ import {
 
 interface WalletData {
   balance: number;
-  agent: string;
   dailyLimit: number;
   perCallLimit: number;
   spentToday: number;
@@ -32,6 +31,7 @@ interface SpendEntry {
   service: string;
   amount: number;
   block: number;
+  agent: string;
 }
 
 export default function Dashboard() {
@@ -50,26 +50,26 @@ export default function Dashboard() {
     if (!address) return;
     const saved = getSavedAgents(address);
     setAgents(saved);
-    loadWallet();
-    loadSpendHistory();
   }, [address]);
 
-  async function loadWallet() {
-    console.log("[Dashboard] Loading wallet for address:", address);
-    try {
-      const result = await getWallet(address!);
+  // Reload wallet data when agent selection changes
+  useEffect(() => {
+    if (!address || agents.length === 0) return;
+    loadWallet();
+    loadSpendHistory();
+  }, [address, selectedAgentIdx, agents]);
 
-      // v2 contract returns: { active, balance, daily-limit, last-reset-block, per-call-limit, spent-today }
-      // Note: agent is NOT in the wallet tuple — it's managed separately
+  async function loadWallet() {
+    const agentAddr = agents[selectedAgentIdx]?.address;
+    if (!agentAddr) { setLoading(false); return; }
+    console.log("[Dashboard] Loading wallet for owner:", address, "agent:", agentAddr);
+    try {
+      // v3: getWallet(owner, agent)
+      const result = await getWallet(address!, agentAddr);
       const v = result?.value?.value;
       if (v && v.balance && v["daily-limit"] && v["per-call-limit"]) {
-        // Get agent address from saved agents in localStorage
-        const savedAgentsList = getSavedAgents(address!);
-        const agentAddr = savedAgentsList.length > 0 ? savedAgentsList[0].address : "—";
-
         setWalletData({
           balance: parseInt(v.balance.value),
-          agent: agentAddr,
           dailyLimit: parseInt(v["daily-limit"].value),
           perCallLimit: parseInt(v["per-call-limit"].value),
           spentToday: parseInt(v["spent-today"]?.value || "0"),
@@ -87,9 +87,11 @@ export default function Dashboard() {
   }
 
   async function loadSpendHistory() {
-    if (!address) return;
+    const agentAddr = agents[selectedAgentIdx]?.address;
+    if (!address || !agentAddr) return;
     try {
-      const nonceResult = await getSpendNonce(address);
+      // v3: getSpendNonce(owner, agent)
+      const nonceResult = await getSpendNonce(address, agentAddr);
       const nonce = nonceResult?.value ? parseInt(nonceResult.value) : 0;
       if (nonce === 0) return;
 
@@ -98,7 +100,8 @@ export default function Dashboard() {
 
       for (let i = start; i < nonce; i++) {
         try {
-          const record = await getSpendRecord(address, i);
+          // v3: getSpendRecord(owner, agent, nonce)
+          const record = await getSpendRecord(address, agentAddr, i);
           if (record && record.value && record.value.value) {
             const v = record.value.value;
             entries.push({
@@ -106,6 +109,7 @@ export default function Dashboard() {
               service: v.service.value,
               amount: parseInt(v.amount.value),
               block: parseInt(v.block.value),
+              agent: agentAddr,
             });
           }
         } catch { }
@@ -118,10 +122,13 @@ export default function Dashboard() {
 
   function toggleActive() {
     if (!wallet) return;
+    const agentAddr = agents[selectedAgentIdx]?.address;
+    if (!agentAddr) return;
     const newState = !wallet.active;
     setTxStatus(newState ? "Activating wallet..." : "Deactivating wallet...");
 
-    setActive(newState, () => {
+    // v3: setActive(agent, isActive)
+    setActive(agentAddr, newState, () => {
       setTxStatus("Transaction submitted! Waiting for confirmation...");
 
       let attempts = 0;
@@ -481,7 +488,7 @@ function AgentConfigSection({ address, wallet }: { address: string; wallet: Wall
           <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-black/20 border border-border/30">
             <div className="flex items-center gap-3">
               <span className="w-6 h-6 rounded-md bg-warning/20 flex items-center justify-center text-[10px] font-bold text-warning">1</span>
-              <p className="text-[10px] font-mono text-text-muted truncate max-w-[280px]">{wallet?.agent}</p>
+              <p className="text-[10px] font-mono text-text-muted truncate max-w-[280px]">{agents[0]?.address || "—"}</p>
             </div>
             <span className="text-[10px] font-medium text-success">Active</span>
           </div>

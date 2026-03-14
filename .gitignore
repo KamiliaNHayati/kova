@@ -14,3 +14,4 @@ node_modules
 
 **/agent/.env
 **/frontend/.env
+**/agent/kova_state.json

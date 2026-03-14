@@ -1,0 +1,15 @@
+﻿node.exe : npm error could not determine 
+executable to run
+At C:\Program Files\nodejs\npx.ps1:29 char:3
++   & $NODE_EXE $NPX_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: 
+    (npm error could...ecutable to run:Str  
+  ing) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommand 
+   Error
+ 
+npm error A complete log of this run can be 
+found in: C:\Users\moeew\AppData\Local\npm-c
+ache\_logs\2026-03-12T19_17_35_314Z-debug-0.
+log

@@ -24,7 +24,17 @@ const pendingApprovals = new Map(); // requestId → { resolve, reject, details 
  * @param {string} savedChatId - Optional pre-saved chat ID
  * @param {number} threshold - Initial approval threshold in STX
  */
-export function initBot(token, savedChatId, threshold) {
+export async function initBot(token, savedChatId, threshold) {
+    if (bot) {
+        try {
+            bot.removeAllListeners();
+            await bot.stopPolling();
+        } catch (e) {
+            console.error("Error stopping previous bot polling:", e.message);
+        }
+        bot = null;
+    }
+
     if (!token) {
         console.log("   ⚠️  No TELEGRAM_BOT_TOKEN — bot disabled");
         return false;
@@ -32,7 +42,7 @@ export function initBot(token, savedChatId, threshold) {
 
     bot = new TelegramBot(token, { polling: true });
     if (savedChatId) chatId = savedChatId;
-    if (threshold) approvalThreshold = threshold;
+    if (threshold !== undefined) approvalThreshold = threshold;
 
     // ─── /start command ───────────────────────────
     bot.onText(/\/start/, (msg) => {

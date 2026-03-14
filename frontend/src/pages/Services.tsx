@@ -5,6 +5,7 @@ import {
   disallowService,
   isServiceAllowed,
 } from "../lib/contracts";
+import { getSavedAgents, type AgentKeypair } from "../lib/agentKeys";
 import {
   Globe,
   Plus,
@@ -20,6 +21,8 @@ import {
   Store,
   ExternalLink,
   Search,
+  Bot,
+  ChevronDown,
 } from "lucide-react";
 
 const STORAGE_KEY = "kova-allowed-services";
@@ -30,7 +33,7 @@ const MARKETPLACE_SERVICES = [
   {
     name: "Price Feed",
     description: "Real-time crypto price data (BTC, ETH, STX) with 2% change tracking",
-    address: "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37",
+    address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663",
     price: "0.5 STX",
     category: "Data",
     icon: BarChart3,
@@ -40,7 +43,7 @@ const MARKETPLACE_SERVICES = [
   {
     name: "Text Summarizer",
     description: "AI-powered text summarization using GPT models. Send long content, get concise summaries.",
-    address: "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37",
+    address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663",
     price: "1 STX",
     category: "AI",
     icon: FileText,
@@ -50,7 +53,7 @@ const MARKETPLACE_SERVICES = [
   {
     name: "Image Generator",
     description: "Generate AI images from text prompts. Powered by DALL-E and Stability AI.",
-    address: "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37",
+    address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663",
     price: "2 STX",
     category: "AI",
     icon: Image,
@@ -98,6 +101,7 @@ function saveServices(owner: string, services: string[]) {
 
 interface AllowedService {
   address: string;
+  name?: string;
   allowed: boolean;
 }
 
@@ -105,41 +109,79 @@ export default function Services() {
   const { address } = useWallet();
   const [services, setServices] = useState<AllowedService[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingService, setLoadingService] = useState<string | null>(null);
   const [addAddr, setAddAddr] = useState("");
   const [txStatus, setTxStatus] = useState("");
+  async function pushAudit(action: string, details: any) {
+    if (!address) return;
+    try {
+      await fetch("http://localhost:4000/api/audit-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, owner: address, ...details })
+      });
+    } catch {}
+  }
   const [tab, setTab] = useState<"marketplace" | "allowlist">("marketplace");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("All");
+  const [agents, setAgents] = useState<AgentKeypair[]>([]);
+  const [selectedAgentIdx, setSelectedAgentIdx] = useState(0);
+  const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
 
   useEffect(() => {
     if (!address) return;
+    setAgents(getSavedAgents(address));
     loadAllowedServices();
   }, [address]);
 
+  // Reload when agent selection changes
+  useEffect(() => {
+    if (!address || agents.length === 0) return;
+    loadAllowedServices();
+  }, [selectedAgentIdx, agents]);
+
   async function loadAllowedServices() {
     setLoading(true);
-    const saved = getSavedServices(address!);
-    const results: AllowedService[] = [];
-
-    for (const addr of saved) {
+    const addrs = getSavedServices(address!);
+    const agentAddr = agents[selectedAgentIdx]?.address;
+    if (!agentAddr) {
+        setLoading(false);
+        return;
+    }
+    let results: any[] = [];
+    for (const addr of addrs) {
       try {
-        const resp = await isServiceAllowed(address!, addr);
+        const resp = await isServiceAllowed(address!, agentAddr, addr);
         results.push({
           address: addr,
           allowed: resp.value === true,
         });
-      } catch {
-        results.push({ address: addr, allowed: false });
+      } catch (err) {
+        console.error("Failed to check allow status for", addr, err);
+        results.push({
+          address: addr,
+          allowed: false,
+        });
       }
     }
-
     setServices(results);
     setLoading(false);
   }
 
-  function handleAllow(serviceAddr: string, serviceName?: string) {
+  function handleAllow(serviceAddr: string, serviceName: string) {
+    const agentAddr = agents[selectedAgentIdx]?.address;
+    if (!agentAddr) return;
     setTxStatus("Confirm in your wallet...");
-    allowService(serviceAddr, () => {
+    setLoadingService(serviceName);
+    allowService(agentAddr, serviceAddr, (data) => {
+      if (data && data.error) {
+        setTxStatus(`Error: ${data.error}`);
+        setLoadingService(null);
+        setTimeout(() => setTxStatus(""), 4000);
+        return;
+      }
+
       setTxStatus("Transaction submitted! Waiting for confirmation...");
 
       const saved = getSavedServices(address!);
@@ -147,14 +189,14 @@ export default function Services() {
         saveServices(address!, [...saved, serviceAddr]);
       }
 
-      // Track explicitly allowed service name
       if (serviceName) {
         try {
-          const data = JSON.parse(localStorage.getItem(EXPLICIT_KEY) || "{}");
+          const storeKey = `${EXPLICIT_KEY}-${agentAddr}`;
+          const data = JSON.parse(localStorage.getItem(storeKey) || "{}");
           const list: string[] = data[address!] || [];
           if (!list.includes(serviceName)) list.push(serviceName);
           data[address!] = list;
-          localStorage.setItem(EXPLICIT_KEY, JSON.stringify(data));
+          localStorage.setItem(storeKey, JSON.stringify(data));
         } catch { }
       }
 
@@ -162,10 +204,12 @@ export default function Services() {
       const poll = setInterval(async () => {
         attempts++;
         try {
-          const resp = await isServiceAllowed(address!, serviceAddr);
+          const resp = await isServiceAllowed(address!, agentAddr, serviceAddr);
           if (resp.value === true || attempts >= 24) {
             clearInterval(poll);
+            if (resp.value === true) pushAudit("ALLOW_SERVICE", { agentAddr, serviceAddr, serviceName });
             setTxStatus(resp.value === true ? "Service allowed!" : "");
+            setLoadingService(null);
             setTimeout(() => setTxStatus(""), 3000);
             loadAllowedServices();
           }
@@ -173,25 +217,38 @@ export default function Services() {
           if (attempts >= 24) {
             clearInterval(poll);
             setTxStatus("");
+            setLoadingService(null);
           }
         }
       }, 5000);
     });
   }
 
-  function handleDisallow(serviceAddr: string) {
+  function handleDisallow(serviceAddr: string, serviceName: string) {
+    const agentAddr = agents[selectedAgentIdx]?.address;
+    if (!agentAddr) return;
     setTxStatus("Confirm in your wallet...");
-    disallowService(serviceAddr, () => {
+    setLoadingService(serviceName);
+    disallowService(agentAddr, serviceAddr, (data) => {
+      if (data && data.error) {
+        setTxStatus(`Error: ${data.error}`);
+        setLoadingService(null);
+        setTimeout(() => setTxStatus(""), 4000);
+        return;
+      }
+      
       setTxStatus("Transaction submitted! Waiting for confirmation...");
 
       let attempts = 0;
       const poll = setInterval(async () => {
         attempts++;
         try {
-          const resp = await isServiceAllowed(address!, serviceAddr);
+          const resp = await isServiceAllowed(address!, agentAddr, serviceAddr);
           if (resp.value !== true || attempts >= 24) {
             clearInterval(poll);
+            if (resp.value !== true) pushAudit("DISALLOW_SERVICE", { agentAddr, serviceAddr });
             setTxStatus(resp.value !== true ? "Service removed!" : "");
+            setLoadingService(null);
             setTimeout(() => setTxStatus(""), 3000);
             loadAllowedServices();
           }
@@ -199,6 +256,7 @@ export default function Services() {
           if (attempts >= 24) {
             clearInterval(poll);
             setTxStatus("");
+            setLoadingService(null);
           }
         }
       }, 5000);
@@ -207,9 +265,10 @@ export default function Services() {
 
   function handleAddByAddress() {
     if (!addAddr.startsWith("ST") && !addAddr.startsWith("SP")) return;
-    handleAllow(addAddr, undefined);
+    handleAllow(addAddr, "Unknown");
     setAddAddr("");
   }
+
 
   function handleRemoveFromList(addr: string) {
     const saved = getSavedServices(address!);
@@ -218,9 +277,12 @@ export default function Services() {
   }
 
   function isAllowlisted(name: string, addr: string): boolean {
-    // Check if this specific service was explicitly allowed by the user
+    // Check if this specific service was explicitly allowed by the user for this agent
+    const agentAddr = agents[selectedAgentIdx]?.address;
+    if (!agentAddr) return false;
     try {
-      const data = JSON.parse(localStorage.getItem(EXPLICIT_KEY) || "{}");
+      const storeKey = `${EXPLICIT_KEY}-${agentAddr}`;
+      const data = JSON.parse(localStorage.getItem(storeKey) || "{}");
       const list: string[] = data[address!] || [];
       return list.includes(name) && services.some((s) => s.address === addr && s.allowed);
     } catch {
@@ -340,6 +402,11 @@ export default function Services() {
                     <span className="text-sm font-bold text-accent">{svc.price}</span>
                   </div>
 
+                  {/* Fee notice */}
+                  <p className="text-[10px] text-text-muted/70 mb-2 mt-[-8px]">
+                    service price is gross; platform fee 2% will be deducted
+                  </p>
+
                   {/* Description */}
                   <p className="text-xs text-text-muted mb-4 line-clamp-2">{svc.description}</p>
 
@@ -357,6 +424,14 @@ export default function Services() {
                       >
                         <ShieldCheck className="w-3.5 h-3.5" />
                         Allowed
+                      </button>
+                    ) : loadingService === svc.name ? (
+                      <button
+                        disabled
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-accent/50 text-white cursor-not-allowed"
+                      >
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Pending...
                       </button>
                     ) : (
                       <button
@@ -419,6 +494,7 @@ export default function Services() {
             </div>
           </div>
 
+
           {/* Allowed services list */}
           <h3 className="font-semibold mb-4">Allowed Services</h3>
 
@@ -461,20 +537,28 @@ export default function Services() {
 
                     <div className="flex items-center gap-2">
                       {svc.allowed ? (
-                        <button
-                          onClick={() => handleDisallow(svc.address)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-success/10 text-success hover:bg-success/20 transition-colors"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          Allowed
-                        </button>
+                        loadingService === marketplaceInfo?.name ? (
+                          <button disabled className="px-3 py-2 text-xs font-medium text-text-muted cursor-not-allowed flex items-center gap-1">
+                            <div className="w-3.5 h-3.5 border-2 border-text-muted border-t-transparent rounded-full animate-spin" />
+                            Removing...
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleDisallow(svc.address, marketplaceInfo?.name || "Unknown")}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${loadingService === marketplaceInfo?.name ? "bg-success/5 text-success/50 cursor-not-allowed" : "bg-success/10 text-success hover:bg-success/20"}`}
+                          >
+                            {loadingService === marketplaceInfo?.name ? <div className="w-3.5 h-3.5 border-2 border-success/50 border-t-transparent rounded-full animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                            {loadingService === marketplaceInfo?.name ? "Pending..." : "Allowed"}
+                          </button>
+                        )
                       ) : (
                         <button
-                          onClick={() => handleAllow(svc.address)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-surface-2 text-text-muted hover:text-text hover:bg-border transition-colors"
+                          onClick={() => handleAllow(svc.address, marketplaceInfo?.name || "Unknown")}
+                          disabled={loadingService === marketplaceInfo?.name}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${loadingService === marketplaceInfo?.name ? "bg-surface-2 text-text-muted/50 cursor-not-allowed" : "bg-surface-2 text-text-muted hover:text-text hover:bg-border"}`}
                         >
-                          <ShieldOff className="w-3.5 h-3.5" />
-                          Allow
+                          {loadingService === marketplaceInfo?.name ? <div className="w-3.5 h-3.5 border-2 border-text-muted/50 border-t-transparent rounded-full animate-spin" /> : <ShieldOff className="w-3.5 h-3.5" />}
+                          {loadingService === marketplaceInfo?.name ? "Pending..." : "Allow"}
                         </button>
                       )}
                       <button

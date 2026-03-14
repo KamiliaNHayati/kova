@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useWallet } from "../context/WalletContext";
-import { getSpendNonce, getSpendRecord } from "../lib/contracts";
-import { Activity as ActivityIcon, ArrowUpRight } from "lucide-react";
+import { getSavedAgents, type AgentKeypair } from "../lib/agentKeys";
+import { Activity as ActivityIcon, ArrowUpRight, ChevronDown, Bot } from "lucide-react";
 
 interface SpendRecord {
   nonce: number;
@@ -15,67 +15,106 @@ export default function Activity() {
   const { address } = useWallet();
   const [records, setRecords] = useState<SpendRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [agents, setAgents] = useState<AgentKeypair[]>([]);
+  const [selectedAgentAddr, setSelectedAgentAddr] = useState<string>("ALL");
+  const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const LIMIT = 20;
+
+  useEffect(() => {
+    if (address) {
+      const savedAgents = getSavedAgents(address);
+      setAgents(savedAgents);
+    }
+  }, [address]);
 
   useEffect(() => {
     if (!address) return;
-    loadRecords();
-  }, [address]);
+    setOffset(0);
+    loadRecords(0);
+  }, [address, selectedAgentAddr]);
 
-  async function loadRecords() {
+  async function loadRecords(currentOffset: number) {
+    setLoading(true);
     try {
-      const nonceResult = await getSpendNonce(address!);
-      console.log("[Activity] spend-nonce result:", JSON.stringify(nonceResult));
-
-      // getSpendNonce returns uint directly (not optional)
-      const nonce = parseInt(nonceResult.value);
-      console.log("[Activity] Parsed nonce:", nonce);
-
-      if (!nonce || nonce === 0) {
-        console.log("[Activity] No spending records (nonce = 0)");
-        setRecords([]);
-        setLoading(false);
-        return;
-      }
-
-      const loaded: SpendRecord[] = [];
-
-      const start = Math.max(0, nonce - 50);
-      for (let i = start; i < nonce; i++) {
-        try {
-          const record = await getSpendRecord(address!, i);
-          console.log(`[Activity] Record ${i}:`, JSON.stringify(record));
-
-          // cvToJSON for map-get? returns double-nested:
-          // { value: { value: { agent: {...}, service: {...}, ... } } }
-          if (record && record.value && record.value.value) {
-            const v = record.value.value;
-            loaded.push({
-              nonce: i,
-              agent: v.agent.value,
-              service: v.service.value,
-              amount: parseInt(v.amount.value),
-              block: parseInt(v.block.value),
-            });
-          }
-        } catch (err) {
-          console.error(`[Activity] Error loading record ${i}:`, err);
-          continue;
+      const resp = await fetch(`http://localhost:4000/api/activity?owner=${address}&agent=${selectedAgentAddr}&limit=${LIMIT}&offset=${currentOffset}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (currentOffset === 0) {
+            setRecords(data.records || []);
+        } else {
+            setRecords(prev => [...prev, ...(data.records || [])]);
         }
+        setTotalCount(data.totalCount || 0);
+      } else {
+        if (currentOffset === 0) setRecords([]);
       }
-      setRecords(loaded);
     } catch (err) {
-      console.error("[Activity] Error loading records:", err);
-      setRecords([]);
+      console.error("[Activity] Error loading records from backend:", err);
+      if (currentOffset === 0) setRecords([]);
     }
     setLoading(false);
   }
 
+  function handleLoadMore() {
+    const newOffset = offset + LIMIT;
+    setOffset(newOffset);
+    loadRecords(newOffset);
+  }
+
+  const getAgentLabel = (addr: string) => {
+    if (addr === "ALL") return "All Agents";
+    const agent = agents.find(a => a.address === addr);
+    return agent ? agent.label : addr.substring(0, 10) + "...";
+  };
+
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-2">Activity</h1>
-      <p className="text-text-muted text-sm mb-8">
-        On-chain spending history for your agent wallet
-      </p>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold mb-2">Activity</h1>
+          <p className="text-text-muted text-sm">
+            On-chain spending history for your agent wallet
+          </p>
+        </div>
+        
+        {/* Agent Filter Dropdown */}
+        {agents.length > 0 && (
+          <div className="relative w-64">
+            <button
+              onClick={() => setAgentDropdownOpen(!agentDropdownOpen)}
+              className="w-full flex items-center justify-between px-4 py-2.5 bg-surface border border-border rounded-xl hover:border-accent/40 transition-all text-sm shadow-sm"
+            >
+              <div className="flex items-center gap-2">
+                <Bot className="w-4 h-4 text-warning" />
+                <span className="font-medium text-white">{getAgentLabel(selectedAgentAddr)}</span>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-text-muted transition-transform ${agentDropdownOpen ? "rotate-180" : ""}`} />
+            </button>
+            {agentDropdownOpen && (
+              <div className="absolute top-full right-0 mt-1 bg-surface border border-border rounded-xl overflow-hidden shadow-xl z-50">
+                <button
+                  onClick={() => { setSelectedAgentAddr("ALL"); setAgentDropdownOpen(false); }}
+                  className={`w-full flex items-center gap-2 px-4 py-3 hover:bg-accent/5 transition-colors text-left text-sm ${"ALL" === selectedAgentAddr ? "bg-accent/10 border-l-2 border-accent text-white font-medium" : "text-text-muted"}`}
+                >
+                  <Bot className="w-4 h-4 text-warning" /> All Agents
+                </button>
+                {agents.map((agent) => (
+                  <button
+                    key={agent.address}
+                    onClick={() => { setSelectedAgentAddr(agent.address); setAgentDropdownOpen(false); }}
+                    className={`w-full flex items-center gap-2 px-4 py-3 hover:bg-accent/5 transition-colors text-left text-sm ${agent.address === selectedAgentAddr ? "bg-accent/10 border-l-2 border-accent text-white font-medium" : "text-text-muted"}`}
+                  >
+                    <Bot className="w-4 h-4 text-warning flex-shrink-0" />
+                    <div className="truncate">{agent.label}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center h-32">
@@ -129,6 +168,18 @@ export default function Activity() {
               </div>
             </div>
           ))}
+          
+          {records.length > 0 && records.length < totalCount && (
+            <div className="pt-4 flex justify-center">
+              <button
+                onClick={handleLoadMore}
+                disabled={loading}
+                className="px-6 py-2 rounded-xl border border-border bg-surface-2 hover:bg-surface-3 transition-colors text-sm font-medium text-text disabled:opacity-50"
+              >
+                {loading ? "Loading..." : "Load More"}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

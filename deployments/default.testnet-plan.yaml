@@ -9,17 +9,17 @@ plan:
     - id: 0
       transactions:
         - contract-publish:
-            contract-name: agent-wallet-v2
+            contract-name: agent-wallet-v4
             expected-sender: STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37
-            cost: 224705
-            path: "contracts\\agent-wallet-v2.clar"
+            cost: 224754
+            path: "contracts\\agent-wallet-v4.clar"
             anchor-block-only: true
             clarity-version: 3
         - contract-publish:
-            contract-name: service-registry-v2
+            contract-name: service-registry-v3
             expected-sender: STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37
-            cost: 223320
-            path: "contracts\\service-registry-v2.clar"
+            cost: 223368
+            path: "contracts\\service-registry-v3.clar"
             anchor-block-only: true
             clarity-version: 3
       epoch: "3.2"

@@ -1,0 +1,256 @@
+﻿
+[1m[46m RUN [49m[22m [36mv3.2.4 [39m[90mC:/Users/moeew/OneDrive/Dokumen/Hackathon/stacks-btc/kova[39m
+
+node.exe : 
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m[1m[41m 
+Unhandled Errors 
+[49m[22m[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m
+At C:\Program Files\nodejs\npx.ps1:29 char:3
++   & $NODE_EXE $NPX_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: 
+    ([31mΓÄ»ΓÄ»ΓÄ»Γ...»ΓÄ»ΓÄ»ΓÄ»[39m:Str  
+  ing) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommand 
+   Error
+ 
+[31m[1m
+Vitest caught 1 unhandled error during the 
+test run.
+This might cause false positive tests. 
+Resolve unhandled errors to make sure your 
+tests are not affected.[22m[39m
+
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m[1m[41m 
+Unhandled Error 
+[49m[22m[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m
+[31m[1mUnknown Error[22m[39m: error: 
+illegal non-ASCII character, '├ó'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:13:49
+;;   2. Owner calls 
+register-operator(operator) ├ó┬Ç┬ö one-time 
+setup
+                                            
+    ^
+error: illegal non-ASCII character, '┬Ç'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:13:50
+;;   2. Owner calls 
+register-operator(operator) ├ó┬Ç┬ö one-time 
+setup
+                                            
+     ^
+error: illegal non-ASCII character, '┬ö'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:13:51
+;;   2. Owner calls 
+register-operator(operator) ├ó┬Ç┬ö one-time 
+setup
+                                            
+      ^
+error: illegal non-ASCII character, '├ó'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:14:44
+;;   3. Owner calls deposit(agent, amount) 
+├ó┬Ç┬ö fund agent escrow
+                                           ^
+error: illegal non-ASCII character, '┬Ç'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:14:45
+;;   3. Owner calls deposit(agent, amount) 
+├ó┬Ç┬ö fund agent escrow
+                                            
+^
+error: illegal non-ASCII character, '┬ö'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:14:46
+;;   3. Owner calls deposit(agent, amount) 
+├ó┬Ç┬ö fund agent escrow
+                                            
+ ^
+error: illegal non-ASCII character, '├ó'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:15:51
+;;   4. Owner calls allow-service(agent, 
+service) ├ó┬Ç┬ö per-agent allowlist
+                                            
+      ^
+error: illegal non-ASCII character, '┬Ç'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:15:52
+;;   4. Owner calls allow-service(agent, 
+service) ├ó┬Ç┬ö per-agent allowlist
+                                            
+       ^
+error: illegal non-ASCII character, '┬ö'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:15:53
+;;   4. Owner calls allow-service(agent, 
+service) ├ó┬Ç┬ö per-agent allowlist
+                                            
+        ^
+error: illegal non-ASCII character, '├ó'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:17:9
+;;      ├ó┬å┬Æ checks wallet, limits, 
+allowlist
+        ^
+error: illegal non-ASCII character, '┬å'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:17:10
+;;      ├ó┬å┬Æ checks wallet, limits, 
+allowlist
+         ^
+error: illegal non-ASCII character, '┬Æ'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:17:11
+;;      ├ó┬å┬Æ checks wallet, limits, 
+allowlist
+          ^
+error: illegal non-ASCII character, '├ó'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:18:9
+;;      ├ó┬å┬Æ transfers (amount - 2% fee) 
+to service
+        ^
+error: illegal non-ASCII character, '┬å'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:18:10
+;;      ├ó┬å┬Æ transfers (amount - 2% fee) 
+to service
+         ^
+error: illegal non-ASCII character, '┬Æ'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:18:11
+;;      ├ó┬å┬Æ transfers (amount - 2% fee) 
+to service
+          ^
+error: illegal non-ASCII character, '├ó'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:19:9
+;;      ├ó┬å┬Æ transfers 2% fee to platform
+        ^
+error: illegal non-ASCII character, '┬å'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:19:10
+;;      ├ó┬å┬Æ transfers 2% fee to platform
+         ^
+error: illegal non-ASCII character, '┬Æ'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:19:11
+;;      ├ó┬å┬Æ transfers 2% fee to platform
+          ^
+error: illegal non-ASCII character, '├ó'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:20:9
+;;      ├ó┬å┬Æ logs spend
+        ^
+error: illegal non-ASCII character, '┬å'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:20:10
+;;      ├ó┬å┬Æ logs spend
+         ^
+error: illegal non-ASCII character, '┬Æ'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:20:11
+;;      ├ó┬å┬Æ logs spend
+          ^
+error: illegal non-ASCII character, '├ó'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:52:53
+;; serviceAmount = amount - platformFee  
+(remainder ├ó┬å┬Æ service)
+                                            
+        ^
+error: illegal non-ASCII character, '┬å'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:52:54
+;; serviceAmount = amount - platformFee  
+(remainder ├ó┬å┬Æ service)
+                                            
+         ^
+error: illegal non-ASCII character, '┬Æ'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:52:55
+;; serviceAmount = amount - platformFee  
+(remainder ├ó┬å┬Æ service)
+                                            
+          ^
+error: illegal non-ASCII character, '├ó'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:62:37
+;; Platform address (where fees go) ├ó┬Ç┬ö 
+configurable by admin
+                                    ^
+error: illegal non-ASCII character, '┬Ç'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:62:38
+;; Platform address (where fees go) ├ó┬Ç┬ö 
+configurable by admin
+                                     ^
+error: illegal non-ASCII character, '┬ö'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:62:39
+;; Platform address (where fees go) ├ó┬Ç┬ö 
+configurable by admin
+                                      ^
+error: illegal non-ASCII character, '├ó'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:335:35
+    ;; Fee calculation: remainder ├ó┬å┬Æ 
+service
+                                  ^
+error: illegal non-ASCII character, '┬å'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:335:36
+    ;; Fee calculation: remainder ├ó┬å┬Æ 
+service
+                                   ^
+error: illegal non-ASCII character, '┬Æ'
+--> C:\Users\moeew\OneDrive\Dokumen\Hackatho
+n\stacks-btc\kova/contracts/agent-wallet-v3.
+clar:335:37
+    ;; Fee calculation: remainder ├ó┬å┬Æ 
+service
+                                    ^
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ
+»ΓÄ»ΓÄ»[39m
+
+
+[2m Test Files [22m [90m (4)[39m
+[2m      Tests [22m [2mno tests[22m
+[2m     Errors [22m [1m[31m1 error[39m[22m
+[2m   Start at [22m 02:13:21
+[2m   Duration [22m 1.54s[2m (transform 21ms, setup 0ms, collect 0ms, tests 0ms, environment 0ms, prepare 0ms)[22m
+
