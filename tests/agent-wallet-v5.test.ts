@@ -9,7 +9,7 @@ const wallet3 = accounts.get("wallet_3")!; // service
 const wallet4 = accounts.get("wallet_4")!; // agent 2 / operator
 const wallet5 = accounts.get("wallet_5")!; // unauthorized
 
-const CONTRACT = "agent-wallet-v4";
+const CONTRACT = "agent-wallet-v5";
 
 // ═══════════════════════════════════════════════
 // Helper: setup a standard wallet + deposit + allow service
@@ -704,8 +704,9 @@ describe("owner-management", () => {
 // validate-spend (pre-flight check — explicit agent param)
 // ═══════════════════════════════════════════════
 describe("validate-spend", () => {
-  it("returns ok for valid spend", () => {
+  it("returns ok for valid spend (operator caller)", () => {
     setupWallet();
+    registerOperator(wallet1, wallet4);
     const result = simnet.callReadOnlyFn(
       CONTRACT,
       "validate-spend",
@@ -715,13 +716,31 @@ describe("validate-spend", () => {
         Cl.standardPrincipal(wallet3),  // service
         Cl.uint(50),
       ],
-      wallet4 // anyone can call read-only
+      wallet4 // registered operator
     );
     expect(result.result).toBeOk(Cl.bool(true));
   });
 
+  it("rejects unauthorized caller (no operator registered)", () => {
+    setupWallet();
+    // No operator registered — wallet4 is not authorized
+    const result = simnet.callReadOnlyFn(
+      CONTRACT,
+      "validate-spend",
+      [
+        Cl.standardPrincipal(wallet1),
+        Cl.standardPrincipal(wallet2),
+        Cl.standardPrincipal(wallet3),
+        Cl.uint(50),
+      ],
+      wallet4
+    );
+    expect(result.result).toBeErr(Cl.uint(118)); // ERR-NOT-AUTHORIZED
+  });
+
   it("rejects insufficient balance", () => {
     setupWallet(wallet1, wallet2, 10000, 10000, 100);
+    registerOperator(wallet1, wallet4);
     const result = simnet.callReadOnlyFn(
       CONTRACT,
       "validate-spend",
@@ -738,6 +757,7 @@ describe("validate-spend", () => {
 
   it("rejects inactive wallet", () => {
     setupWallet();
+    registerOperator(wallet1, wallet4);
     simnet.callPublicFn(CONTRACT, "set-active", [Cl.standardPrincipal(wallet2), Cl.bool(false)], wallet1);
 
     const result = simnet.callReadOnlyFn(

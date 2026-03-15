@@ -12,8 +12,8 @@ import { openContractCall } from "@stacks/connect";
 import { STACKS_TESTNET } from "@stacks/network";
 
 const CONTRACT_ADDRESS = "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37";
-const AGENT_WALLET = "agent-wallet-v4";
-const SERVICE_REGISTRY = "service-registry-v3";
+const AGENT_WALLET = "agent-wallet-v5";
+const SERVICE_REGISTRY = "service-registry-v4";
 
 const network = STACKS_TESTNET;
 
@@ -147,20 +147,16 @@ export async function getOperator(owner: string) {
   );
 }
 
-export async function getOperatorAddress(owner: string) {
+export async function getOperatorAddress(owner: string): Promise<string | null> {
   const result = await callReadOnly(
     AGENT_WALLET,
-    "get-operator-address",
+    "get-operator",
     [standardPrincipalCV(owner)],
     owner
   );
-  if (result.type === 9) { // Optional None
-    return null;
-  }
-  if (result.type === 10) { // Optional Some
-    return result.value.value;
-  }
-  return null;
+  // result.value is (optional { operator: principal })
+  if (!result.value) return null;
+  return result.value.value?.operator?.value ?? null;
 }
 
 export function registerOperator(
@@ -247,21 +243,26 @@ export function createWallet(
   );
 }
 
-// v3: deposit to a specific agent's escrow
+// v4: deposit to a specific agent's escrow
 export function deposit(
   agent: string,
   amount: number,
+  senderAddress: string,
   onFinish?: (data: any) => void
 ) {
+  const postCondition = Pc.principal(senderAddress)
+    .willSendEq(amount)
+    .ustx();
+
   return openContractCall({
     contractAddress: CONTRACT_ADDRESS,
     contractName: AGENT_WALLET,
     functionName: "deposit",
     functionArgs: [standardPrincipalCV(agent), uintCV(amount)],
     network,
-    postConditionMode: PostConditionMode.Allow,
-    postConditions: [],
-    onFinish: onFinish || (() => { }),
+    postConditionMode: PostConditionMode.Deny,
+    postConditions: [postCondition],
+    onFinish: onFinish || (() => {}),
   });
 }
 
@@ -315,7 +316,7 @@ export function setLimits(
   );
 }
 
-// v3: remove-agent (deletes the agent's wallet)
+// v5: remove-agent (deletes the agent's wallet)
 export function removeAgent(
   agent: string,
   onFinish?: (data: any) => void
@@ -328,7 +329,7 @@ export function removeAgent(
   );
 }
 
-// v3: allow-service per agent
+// v5: allow-service per agent
 export function allowService(
   agent: string,
   service: string,

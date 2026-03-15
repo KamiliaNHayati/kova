@@ -11,8 +11,9 @@ app.use(express.json());
 // ─── Config ──────────────────────────────────────────
 const PORT = 3402;
 // Use Index 4 purely as the Service address
-const SERVICE_ADDRESS = process.env.SERVICE_ADDRESS || "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663";
 const FACILITATOR_URL = process.env.FACILITATOR_URL || "https://x402-facilitator.onrender.com";
+const PRICE_FEED_ADDRESS = "STEZW9BF0WATG4DXJTHBFP8WKKEANCY70059MHKW";
+const SUMMARIZER_ADDRESS = "ST2RXHMZKSQSTMK15JEQK4KP5N2YE66F999A7FSXE";
 
 // ─── API Endpoints ───────────────────────────────────
 
@@ -20,7 +21,7 @@ const FACILITATOR_URL = process.env.FACILITATOR_URL || "https://x402-facilitator
 app.get("/api/price-feed",
     x402PaymentRequired({
         amount: STXtoMicroSTX(0.5),
-        address: SERVICE_ADDRESS,
+        address: PRICE_FEED_ADDRESS,
         network: "testnet",
         facilitatorUrl: FACILITATOR_URL,
         description: "Crypto price feed data",
@@ -46,7 +47,7 @@ app.get("/api/price-feed",
 app.get("/api/summarize",
     x402PaymentRequired({
         amount: STXtoMicroSTX(1.0),
-        address: SERVICE_ADDRESS,
+        address: SUMMARIZER_ADDRESS,
         network: "testnet",
         facilitatorUrl: FACILITATOR_URL,
         description: "AI text summarization service",
@@ -78,7 +79,7 @@ app.get("/health", (req, res) => {
     res.json({
         status: "ok",
         service: "kova-x402-service",
-        address: SERVICE_ADDRESS,
+        address: "STB98064SK9G9J4XWP0T2KJDG37JQ3N3T84JMXX2",
         facilitator: FACILITATOR_URL,
         endpoints: [
             { path: "/api/price-feed", price: "0.5 STX", description: "Crypto price data" },
@@ -91,12 +92,13 @@ app.get("/health", (req, res) => {
 app.get("/.well-known/x402", (req, res) => {
     res.json({
         x402Version: 2,
-        address: SERVICE_ADDRESS,
+        address: PRICE_FEED_ADDRESS, // default address
         network: "stacks:2147483648",
         facilitatorUrl: FACILITATOR_URL,
         services: [
             {
                 name: "price-feed",
+                address: PRICE_FEED_ADDRESS, // ✅ correct
                 price: Number(STXtoMicroSTX(0.5)),
                 priceSTX: "0.500000",
                 asset: "STX",
@@ -104,6 +106,7 @@ app.get("/.well-known/x402", (req, res) => {
             },
             {
                 name: "summarize",
+                address: SUMMARIZER_ADDRESS, // ✅ correct
                 price: Number(STXtoMicroSTX(1.0)),
                 priceSTX: "1.000000",
                 asset: "STX",
@@ -137,7 +140,8 @@ app.get("/paid-status", async (req, res) => {
 // ─── Start ───────────────────────────────────────────
 app.listen(PORT, () => {
     console.log(`\n🔒 Kova X402 Service running on http://localhost:${PORT}`);
-    console.log(`   Service address: ${SERVICE_ADDRESS}`);
+    console.log(`   Service Price Feed address: ${PRICE_FEED_ADDRESS}`);
+    console.log(`   Service Summarizer address: ${SUMMARIZER_ADDRESS}`);
     console.log(`   Facilitator:     ${FACILITATOR_URL}`);
     console.log(`\n   Endpoints:`);
     console.log(`   GET /health                     — Free health check`);

@@ -15,11 +15,11 @@ plan:
             path: "contracts\\agent-wallet.clar"
             anchor-block-only: true
             clarity-version: 3
-        - contract-publish:
-            contract-name: service-registry
-            expected-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            cost: 34400
-            path: "contracts\\service-registry.clar"
-            anchor-block-only: true
-            clarity-version: 3
+        # - contract-publish:
+        #     contract-name: service-registry
+        #     expected-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+        #     cost: 34400
+        #     path: "contracts\\service-registry.clar"
+        #     anchor-block-only: true
+        #     clarity-version: 3
       epoch: "3.2"

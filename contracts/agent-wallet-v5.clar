@@ -1,6 +1,6 @@
-;; Kova Agent Wallet v4 - Per-Agent Escrow + Operator-Paid x402 Payments
+;; Kova Agent Wallet v5 - Per-Agent Escrow + Operator-Paid x402 Payments
 ;;
-;; v4: operator-paid model for autonomous agent payments on Stacks.
+;; v5: operator-paid model for autonomous agent payments on Stacks.
 ;;
 ;; Architecture:
 ;;   - Owner registers an operator (backend) on-chain once.
@@ -184,13 +184,6 @@
   (map-get? operators { owner: owner })
 )
 
-(define-read-only (get-operator-address (owner principal))
-  (match (map-get? operators { owner: owner })
-    op-data (some (get operator op-data))
-    none
-  )
-)
-
 (define-read-only (get-platform-address)
   (var-get platform-address)
 )
@@ -307,7 +300,7 @@
   (let ((wallet (unwrap! (map-get? wallets { owner: contract-caller, agent: agent }) ERR-NO-WALLET)))
     (asserts! (> amount u0) ERR-ZERO-AMOUNT)
     ;; Transfer STX from user to contract
-    (try! (stx-transfer? amount contract-caller (as-contract tx-sender)))
+    (try! (stx-transfer? amount contract-caller current-contract))
     ;; Update agent's balance
     (map-set wallets { owner: contract-caller, agent: agent } (merge wallet {
       balance: (+ (get balance wallet) amount)
@@ -324,12 +317,17 @@
   )
     (asserts! (> amount u0) ERR-ZERO-AMOUNT)
     (asserts! (>= (get balance wallet) amount) ERR-INSUFFICIENT-BALANCE)
-    ;; Transfer STX from contract to user
-    (try! (as-contract (stx-transfer? amount tx-sender caller)))
-    ;; Update agent's balance
+
+    ;; Use as-contract? with a proper allowance-list. Inside the body unwrap the transfer
+    ;; using try! so the body does NOT return a response type.
+    (try! (as-contract? ((with-stx amount))
+             (try! (stx-transfer? amount tx-sender caller))))
+
+    ;; Update agent's balance AFTER the transfer succeeded
     (map-set wallets { owner: caller, agent: agent } (merge wallet {
       balance: (- (get balance wallet) amount)
     }))
+
     (ok true)
   )
 )
@@ -381,14 +379,16 @@
     ;; Daily limit
     (asserts! (<= (+ current-spent amount) (get daily-limit wallet)) ERR-DAILY-LIMIT-EXCEEDED)
 
-    ;; --- Transfer STX from escrow to service (minus fee) ---
-    (try! (as-contract (stx-transfer? service-amount tx-sender service)))
-
+    ;; --- Transfer STX from escrow (contract) to service (minus fee) ---
     ;; --- Transfer platform fee to platform address ---
-    (if (> platform-fee u0)
-      (try! (as-contract (stx-transfer? platform-fee tx-sender (var-get platform-address))))
-      true
-    )
+    ;; Combined allowance and both transfers inside one as-contract? block
+    (try! (as-contract? ((with-stx service-amount) (with-stx platform-fee))
+            (begin
+              ;; unwrap each transfer so the final expression is not a response
+              (try! (stx-transfer? service-amount tx-sender service))
+              (if (> platform-fee u0)
+                (try! (stx-transfer? platform-fee tx-sender (var-get platform-address)))
+                true))))
 
     ;; --- Update agent's wallet state ---
     (map-set wallets { owner: owner, agent: agent } (merge wallet {
@@ -405,8 +405,6 @@
       block: burn-block-height
     })
     (map-set spend-nonce { owner: owner, agent: agent } (+ nonce u1))
-
-    (print { action: "agent-pay", owner: owner, agent: agent, service: service, amount: amount, fee: platform-fee, nonce: nonce })
 
     (ok true)
   )
@@ -444,12 +442,15 @@
     (count (default-to u0 (map-get? agent-count contract-caller)))
     (wallet (unwrap! (map-get? wallets { owner: contract-caller, agent: agent }) ERR-AGENT-NOT-FOUND))
   )
-    ;; Block removal if agent still has funds -- owner must withdraw first
     (asserts! (is-eq (get balance wallet) u0) ERR-INSUFFICIENT-BALANCE)
-    ;; Delete the wallet
     (map-delete wallets { owner: contract-caller, agent: agent })
-    ;; Decrement agent count
     (map-set agent-count contract-caller (- count u1))
+    (print { 
+      action: "agent-removed", 
+      owner: contract-caller, 
+      agent: agent,
+      warning: "allowlist entries for this agent persist - call disallow-service before removing"
+    })
     (ok true)
   )
 )

@@ -7,19 +7,12 @@ bitcoin-node: "http://blockstack:blockstacksystem@bitcoind.testnet.stacks.co:183
 plan:
   batches:
     - id: 0
+      epoch: "3.2"
       transactions:
         - contract-publish:
-            contract-name: agent-wallet-v4
+            contract-name: agent-wallet-v5
             expected-sender: STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37
-            cost: 224754
-            path: "contracts\\agent-wallet-v4.clar"
+            cost: 169600
+            path: "contracts/agent-wallet-v5.clar"
             anchor-block-only: true
-            clarity-version: 3
-        - contract-publish:
-            contract-name: service-registry-v3
-            expected-sender: STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37
-            cost: 223368
-            path: "contracts\\service-registry-v3.clar"
-            anchor-block-only: true
-            clarity-version: 3
-      epoch: "3.2"
+            clarity-version: 4

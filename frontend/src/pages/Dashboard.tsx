@@ -38,53 +38,99 @@ export default function Dashboard() {
   const { address } = useWallet();
   const navigate = useNavigate();
   const [wallet, setWalletData] = useState<WalletData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [hasWallet, setHasWallet] = useState(false);
   const [txStatus, setTxStatus] = useState("");
   const [spendHistory, setSpendHistory] = useState<SpendEntry[]>([]);
   const [agents, setAgents] = useState<AgentKeypair[]>([]);
   const [selectedAgentIdx, setSelectedAgentIdx] = useState(0);
   const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
-
+  
   useEffect(() => {
     if (!address) return;
     const saved = getSavedAgents(address);
     setAgents(saved);
   }, [address]);
 
-  // Reload wallet data when agent selection changes
-  useEffect(() => {
-    if (!address || agents.length === 0) return;
-    loadWallet();
-    loadSpendHistory();
-  }, [address, selectedAgentIdx, agents]);
-
   async function loadWallet() {
     const agentAddr = agents[selectedAgentIdx]?.address;
-    if (!agentAddr) { setLoading(false); return; }
+    if (!agentAddr) {
+      console.debug("[Dashboard] loadWallet: no agent selected");
+      setWalletData(null);
+      setHasWallet(false);
+      return;
+    }
+
+    setLoading(true);
     console.log("[Dashboard] Loading wallet for owner:", address, "agent:", agentAddr);
+
     try {
-      // v3: getWallet(owner, agent)
       const result = await getWallet(address!, agentAddr);
-      const v = result?.value?.value;
-      if (v && v.balance && v["daily-limit"] && v["per-call-limit"]) {
+      // debug: log the raw result so you can paste it here if still failing
+      console.debug("[Dashboard] getWallet raw result:", JSON.stringify(result, null, 2));
+
+      // result comes from cvToJSON; it can have multiple shapes depending on optional/map
+      // Try to find the inner wallet object in common places:
+      // 1) result.value.value  (optional wrapping)
+      // 2) result.value        (sometimes direct)
+      // 3) result (if already the inner object)
+      let payload: any = null;
+      if (result === null || result === undefined) {
+        payload = null;
+      } else if (typeof result === "object") {
+        // prefer deepest optional: result.value.value
+        if (result.value && result.value.value) payload = result.value.value;
+        else if (result.value) payload = result.value;
+        else payload = result;
+      } else {
+        payload = null;
+      }
+
+      // Now payload may be the wallet map or null/other
+      // Check for the expected wallet fields
+      if (payload && (payload.balance !== undefined || payload["daily-limit"] !== undefined || payload["per-call-limit"] !== undefined)) {
+        // Fields might be either nested { value: "123" } or raw numbers/strings
+        const norm = (x: any) => {
+          if (x === undefined || x === null) return "0";
+          if (typeof x === "object" && "value" in x) return String(x.value);
+          return String(x);
+        };
+
+        const balance = parseInt(norm(payload.balance || "0"), 10);
+        const dailyLimit = parseInt(norm(payload["daily-limit"] || "0"), 10);
+        const perCall = parseInt(norm(payload["per-call-limit"] || "0"), 10);
+        const spentToday = parseInt(norm(payload["spent-today"] || "0"), 10);
+        const activeFlagRaw = payload.active ?? true;
+        const activeFlag = (typeof activeFlagRaw === "object" && "value" in activeFlagRaw) ? !!activeFlagRaw.value : !!activeFlagRaw;
+
         setWalletData({
-          balance: parseInt(v.balance.value),
-          dailyLimit: parseInt(v["daily-limit"].value),
-          perCallLimit: parseInt(v["per-call-limit"].value),
-          spentToday: parseInt(v["spent-today"]?.value || "0"),
-          active: v.active?.value ?? true,
+          balance,
+          dailyLimit,
+          perCallLimit: perCall,
+          spentToday,
+          active: activeFlag,
         });
         setHasWallet(true);
       } else {
+        // No wallet found
+        console.warn("[Dashboard] getWallet did not contain wallet fields; payload:", payload);
+        setWalletData(null);
         setHasWallet(false);
       }
     } catch (err) {
       console.error("[Dashboard] Error loading wallet:", err);
+      setWalletData(null);
       setHasWallet(false);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
+
+  useEffect(() => {
+    if (!address || agents.length === 0) return; // just return, no setLoading
+    loadWallet();
+    loadSpendHistory();
+  }, [address, selectedAgentIdx, agents]);
 
   async function loadSpendHistory() {
     const agentAddr = agents[selectedAgentIdx]?.address;
@@ -127,31 +173,32 @@ export default function Dashboard() {
     const newState = !wallet.active;
     setTxStatus(newState ? "Activating wallet..." : "Deactivating wallet...");
 
-    // v3: setActive(agent, isActive)
+    // call setActive; callback triggers polling to re-fetch wallet
     setActive(agentAddr, newState, () => {
       setTxStatus("Transaction submitted! Waiting for confirmation...");
 
       let attempts = 0;
       const poll = setInterval(async () => {
         attempts++;
-        await loadWallet();
+        try {
+          await loadWallet(); // re-fetch on-chain state
+          // if loadWallet has found a wallet and state matches newState, we're done
+          if (wallet && (wallet.active === newState)) {
+            clearInterval(poll);
+            setTxStatus("Wallet updated!");
+            setTimeout(() => setTxStatus(""), 3000);
+            return;
+          }
+        } catch (e) {
+          console.debug("[Dashboard] toggleActive poll error:", e);
+        }
 
         if (attempts >= 24) {
           clearInterval(poll);
-          setTxStatus("Refresh the page if state hasn't updated yet.");
+          setTxStatus("Timed out — refresh or check transaction status manually.");
           setTimeout(() => setTxStatus(""), 5000);
         }
       }, 5000);
-
-      const checkDone = setInterval(() => {
-        if (wallet && wallet.active !== newState) {
-        } else {
-          clearInterval(poll);
-          clearInterval(checkDone);
-          setTxStatus("Wallet updated!");
-          setTimeout(() => setTxStatus(""), 3000);
-        }
-      }, 1000);
     });
   }
 

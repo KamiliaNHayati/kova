@@ -33,7 +33,7 @@ const MARKETPLACE_SERVICES = [
   {
     name: "Price Feed",
     description: "Real-time crypto price data (BTC, ETH, STX) with 2% change tracking",
-    address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663",
+    address: "STEZW9BF0WATG4DXJTHBFP8WKKEANCY70059MHKW",
     price: "0.5 STX",
     category: "Data",
     icon: BarChart3,
@@ -43,7 +43,7 @@ const MARKETPLACE_SERVICES = [
   {
     name: "Text Summarizer",
     description: "AI-powered text summarization using GPT models. Send long content, get concise summaries.",
-    address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663",
+    address: "ST2RXHMZKSQSTMK15JEQK4KP5N2YE66F999A7FSXE",
     price: "1 STX",
     category: "AI",
     icon: FileText,
@@ -53,7 +53,7 @@ const MARKETPLACE_SERVICES = [
   {
     name: "Image Generator",
     description: "Generate AI images from text prompts. Powered by DALL-E and Stability AI.",
-    address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663",
+    address: "ST2CV6BJQW3TJY1JXNC41ZEJH78H3H7Z6V011ZEC6",
     price: "2 STX",
     category: "AI",
     icon: Image,
@@ -63,7 +63,7 @@ const MARKETPLACE_SERVICES = [
   {
     name: "Sentiment Analysis",
     description: "Analyze market sentiment from social media and news feeds for trading signals.",
-    address: "ST3NBRSFKX28FQ2ZJ1MAKX58HKHSDNEF55B3MFHQR",
+    address: "ST3NBRSFKX28FQ2ZJ1MAKX58HKHSDNEF55B3MFHQR_",
     price: "1.5 STX",
     category: "AI",
     icon: BrainCircuit,
@@ -73,7 +73,7 @@ const MARKETPLACE_SERVICES = [
   {
     name: "On-chain Analytics",
     description: "Deep analysis of wallet activity, whale movements, and DeFi protocol metrics.",
-    address: "ST3NBRSFKX28FQ2ZJ1MAKX58HKHSDNEF55B3MFHQR",
+    address: "ST3NBRSFKX28FQ2ZJ1MAKX58HKHSDNEF55B3MFHQR__",
     price: "2 STX",
     category: "Data",
     icon: Zap,
@@ -82,21 +82,23 @@ const MARKETPLACE_SERVICES = [
   },
 ];
 
-function getSavedServices(owner: string): string[] {
+function getSavedServices(owner: string, agentAddr?: string): string[] {
   try {
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    return data[owner] || [];
+    const key = agentAddr ? `${owner}-${agentAddr}` : owner;
+    return data[key] || [];
   } catch {
     return [];
   }
 }
 
-function saveServices(owner: string, services: string[]) {
+function saveServices(owner: string, agentAddr: string, services: string[]) {
   try {
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    data[owner] = services;
+    const key = `${owner}-${agentAddr}`;
+    data[key] = services;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch { }
+  } catch {}
 }
 
 interface AllowedService {
@@ -112,6 +114,17 @@ export default function Services() {
   const [loadingService, setLoadingService] = useState<string | null>(null);
   const [addAddr, setAddAddr] = useState("");
   const [txStatus, setTxStatus] = useState("");
+  const [tab, setTab] = useState<"marketplace" | "allowlist">("marketplace");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("All");
+  const [agents, setAgents] = useState<AgentKeypair[]>([]);
+  const [selectedAgentIdx, setSelectedAgentIdx] = useState(0);
+  const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
+
+  // ✅ These go HERE — after state, inside the component
+  const agentAddr = agents[selectedAgentIdx]?.address;
+  const isReady = !!address && !!agentAddr;
+
   async function pushAudit(action: string, details: any) {
     if (!address) return;
     try {
@@ -122,56 +135,57 @@ export default function Services() {
       });
     } catch {}
   }
-  const [tab, setTab] = useState<"marketplace" | "allowlist">("marketplace");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("All");
-  const [agents, setAgents] = useState<AgentKeypair[]>([]);
-  const [selectedAgentIdx, setSelectedAgentIdx] = useState(0);
-  const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
 
+  // Effect 1 — only set agents
   useEffect(() => {
     if (!address) return;
     setAgents(getSavedAgents(address));
-    loadAllowedServices();
   }, [address]);
 
-  // Reload when agent selection changes
+  // Effect 2 — runs when agents actually has values
   useEffect(() => {
-    if (!address || agents.length === 0) return;
+    if (!address || agents.length === 0) {
+      setLoading(false);
+      return;
+    }
     loadAllowedServices();
-  }, [selectedAgentIdx, agents]);
+  }, [selectedAgentIdx, agents, address]);
 
   async function loadAllowedServices() {
     setLoading(true);
-    const addrs = getSavedServices(address!);
     const agentAddr = agents[selectedAgentIdx]?.address;
-    if (!agentAddr) {
-        setLoading(false);
-        return;
-    }
-    let results: any[] = [];
-    for (const addr of addrs) {
-      try {
-        const resp = await isServiceAllowed(address!, agentAddr, addr);
-        results.push({
-          address: addr,
-          allowed: resp.value === true,
-        });
-      } catch (err) {
-        console.error("Failed to check allow status for", addr, err);
-        results.push({
-          address: addr,
-          allowed: false,
-        });
-      }
-    }
-    setServices(results);
+    if (!agentAddr || !address) { setLoading(false); return; }
+
+    const savedAddrs = getSavedServices(address, agentAddr);
+    // Always include marketplace addresses so on-chain state is always checked
+    const marketplaceAddrs = MARKETPLACE_SERVICES.map(s => s.address);
+    const allAddrs = [...new Set([...savedAddrs, ...marketplaceAddrs])];
+
+    const checks = await Promise.all(
+      allAddrs.map(async (addr) => {
+        try {
+          const resp = await isServiceAllowed(address, agentAddr, addr);
+          const allowed = !!(resp?.value === true || resp?.value?.value === true);
+          // Auto-recover localStorage if on-chain says allowed but not saved locally
+          if (allowed && !savedAddrs.includes(addr)) {
+            const saved = getSavedServices(address, agentAddr);
+            saveServices(address, agentAddr, [...saved, addr]);
+          }
+          return { address: addr, allowed };
+        } catch {
+          return { address: addr, allowed: false };
+        }
+      })
+    );
+    // Only show in allowlist tab if saved locally OR allowed on-chain
+    setServices(checks.filter(c => c.allowed || savedAddrs.includes(c.address)));
     setLoading(false);
   }
 
   function handleAllow(serviceAddr: string, serviceName: string) {
     const agentAddr = agents[selectedAgentIdx]?.address;
-    if (!agentAddr) return;
+    if (!address) { setTxStatus("Connect wallet first"); return; }
+    if (!agentAddr) { setTxStatus("Select an agent first"); return; }
     setTxStatus("Confirm in your wallet...");
     setLoadingService(serviceName);
     allowService(agentAddr, serviceAddr, (data) => {
@@ -184,19 +198,19 @@ export default function Services() {
 
       setTxStatus("Transaction submitted! Waiting for confirmation...");
 
-      const saved = getSavedServices(address!);
+      const saved = getSavedServices(address!, agentAddr);
       if (!saved.includes(serviceAddr)) {
-        saveServices(address!, [...saved, serviceAddr]);
+        saveServices(address!, agentAddr, [...saved, serviceAddr]);
       }
 
       if (serviceName) {
         try {
           const storeKey = `${EXPLICIT_KEY}-${agentAddr}`;
-          const data = JSON.parse(localStorage.getItem(storeKey) || "{}");
-          const list: string[] = data[address!] || [];
-          if (!list.includes(serviceName)) list.push(serviceName);
-          data[address!] = list;
-          localStorage.setItem(storeKey, JSON.stringify(data));
+          const stored = JSON.parse(localStorage.getItem(storeKey) || "{}");
+          const list: string[] = stored[address!] || [];
+          if (!list.includes(serviceAddr)) list.push(serviceAddr); // ✅ address
+          stored[address!] = list;
+          localStorage.setItem(storeKey, JSON.stringify(stored));
         } catch { }
       }
 
@@ -226,7 +240,7 @@ export default function Services() {
 
   function handleDisallow(serviceAddr: string, serviceName: string) {
     const agentAddr = agents[selectedAgentIdx]?.address;
-    if (!agentAddr) return;
+    if (!address || !agentAddr) return;
     setTxStatus("Confirm in your wallet...");
     setLoadingService(serviceName);
     disallowService(agentAddr, serviceAddr, (data) => {
@@ -271,23 +285,15 @@ export default function Services() {
 
 
   function handleRemoveFromList(addr: string) {
-    const saved = getSavedServices(address!);
-    saveServices(address!, saved.filter((s) => s !== addr));
+    const agentAddr = agents[selectedAgentIdx]?.address;
+    if (!agentAddr) return;
+    const saved = getSavedServices(address!, agentAddr);
+    saveServices(address!, agentAddr, saved.filter((s) => s !== addr));
     setServices(services.filter((s) => s.address !== addr));
   }
 
-  function isAllowlisted(name: string, addr: string): boolean {
-    // Check if this specific service was explicitly allowed by the user for this agent
-    const agentAddr = agents[selectedAgentIdx]?.address;
-    if (!agentAddr) return false;
-    try {
-      const storeKey = `${EXPLICIT_KEY}-${agentAddr}`;
-      const data = JSON.parse(localStorage.getItem(storeKey) || "{}");
-      const list: string[] = data[address!] || [];
-      return list.includes(name) && services.some((s) => s.address === addr && s.allowed);
-    } catch {
-      return services.some((s) => s.address === addr && s.allowed);
-    }
+  function isAllowlistedByAddress(addr: string): boolean {
+    return services.some(s => s.address === addr && s.allowed);
   }
 
   const categories = ["All", ...new Set(MARKETPLACE_SERVICES.map((s) => s.category))];
@@ -374,7 +380,7 @@ export default function Services() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredServices.map((svc) => {
               const Icon = svc.icon;
-              const allowed = isAllowlisted(svc.name, svc.address);
+              const allowed = isAllowlistedByAddress(svc.address);
 
               return (
                 <div
@@ -436,7 +442,12 @@ export default function Services() {
                     ) : (
                       <button
                         onClick={() => handleAllow(svc.address, svc.name)}
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-accent hover:bg-accent-hover text-white transition-colors"
+                        disabled={!isReady || loadingService === svc.name}
+                        className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                          !isReady
+                            ? "bg-accent/30 text-white/50 cursor-not-allowed"
+                            : "bg-accent hover:bg-accent-hover text-white"
+                        }`}
                       >
                         <Plus className="w-3.5 h-3.5" />
                         Allow Service
@@ -545,6 +556,7 @@ export default function Services() {
                         ) : (
                           <button
                             onClick={() => handleDisallow(svc.address, marketplaceInfo?.name || "Unknown")}
+                            disabled={!isReady || loadingService === marketplaceInfo?.name}
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${loadingService === marketplaceInfo?.name ? "bg-success/5 text-success/50 cursor-not-allowed" : "bg-success/10 text-success hover:bg-success/20"}`}
                           >
                             {loadingService === marketplaceInfo?.name ? <div className="w-3.5 h-3.5 border-2 border-success/50 border-t-transparent rounded-full animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
@@ -554,7 +566,7 @@ export default function Services() {
                       ) : (
                         <button
                           onClick={() => handleAllow(svc.address, marketplaceInfo?.name || "Unknown")}
-                          disabled={loadingService === marketplaceInfo?.name}
+                          disabled={!isReady || loadingService === marketplaceInfo?.name}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${loadingService === marketplaceInfo?.name ? "bg-surface-2 text-text-muted/50 cursor-not-allowed" : "bg-surface-2 text-text-muted hover:text-text hover:bg-border"}`}
                         >
                           {loadingService === marketplaceInfo?.name ? <div className="w-3.5 h-3.5 border-2 border-text-muted/50 border-t-transparent rounded-full animate-spin" /> : <ShieldOff className="w-3.5 h-3.5" />}

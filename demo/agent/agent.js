@@ -81,19 +81,19 @@ function saveState() {
 
 // --- validate-spend: pre-flight check before agent-pay ---
 // v3 operator model: explicit agent param in function args
-async function validateSpend(serviceAddress, amount) {
-    console.log(`   Validating spend rules on-chain...`);
+async function validateSpend(serviceAddress, amount, owner, agent) {
+    const functionArgs = [
+        standardPrincipalCV(owner),
+        standardPrincipalCV(agent),
+        standardPrincipalCV(serviceAddress),
+        uintCV(amount),
+    ];
     try {
         const result = await fetchCallReadOnlyFunction({
             contractAddress: CONTRACT,
-            contractName: "agent-wallet-v4",
+            contractName: "agent-wallet-v5",
             functionName: "validate-spend",
-            functionArgs: [
-                standardPrincipalCV(OWNER),
-                standardPrincipalCV(agentAddress),
-                standardPrincipalCV(serviceAddress),
-                uintCV(amount),
-            ],
+            functionArgs,
             network: STACKS_TESTNET,
             senderAddress: operatorAddress,
         });
@@ -129,20 +129,21 @@ async function validateSpend(serviceAddress, amount) {
 
 // --- agent-pay: operator-signed escrow payment (atomic transfer + log + fee) ---
 // v3 operator model: operator signs and pays gas, 4-param signature
-async function agentPay(serviceAddress, amount) {
+async function agentPay(serviceAddress, amount, owner, agent)  {
     console.log(`   Executing agent-pay (operator-signed) on escrow contract...`);
     console.log(`   Operator signs → escrow transfers STX → service + platform fee\n`);
+    const functionArgs = [
+        standardPrincipalCV(owner),
+        standardPrincipalCV(agent),
+        standardPrincipalCV(serviceAddress),
+        uintCV(amount),
+    ];
     try {
         const txOptions = {
             contractAddress: CONTRACT,
-            contractName: "agent-wallet-v4",
+            contractName: "agent-wallet-v5",
             functionName: "agent-pay",
-            functionArgs: [
-                standardPrincipalCV(OWNER),
-                standardPrincipalCV(agentAddress),
-                standardPrincipalCV(serviceAddress),
-                uintCV(amount),
-            ],
+            functionArgs,
             senderKey: OPERATOR_KEY,
             network: STACKS_TESTNET,
             anchorMode: AnchorMode.Any,
@@ -155,12 +156,45 @@ async function agentPay(serviceAddress, amount) {
             console.error(`   agent-pay broadcast failed: ${broadcastResult.error}`);
             return null;
         }
-        console.log(`   agent-pay tx: 0x${broadcastResult.txid}\n`);
-        return `0x${broadcastResult.txid}`;
+        const txid = broadcastResult.txid;
+        console.log(`   agent-pay tx: 0x${txid}\n`);
+        const waitRes = await pollTxStatus(txid, 45_000, 2000);
+        if (!waitRes.ok && !waitRes.timeout) {
+            console.error(`   ❌ Tx aborted on-chain — skipping service call`);
+            return null;
+        }
+        return `0x${txid}`;
     } catch (err) {
         console.error(`   agent-pay error: ${err.message}\n`);
         return null;
     }
+}
+
+async function pollTxStatus(txid, maxMs = 60_000, intervalMs = 2000) {
+  const base = "https://stacks-node-api.testnet.stacks.co/extended/v1/tx";
+  const start = Date.now();
+  console.log(`   ⏳ Polling tx status: ${txid}`);
+  while (Date.now() - start < maxMs) {
+    try {
+      const res = await fetch(`${base}/${txid}`);
+      if (res.status === 200) {
+        const json = await res.json();
+        if (json.tx_status === "success") {
+          console.log(`   ✅ Tx confirmed on-chain\n`);
+          return { ok: true, json };
+        }
+        if (json.tx_status === "abort_by_response" || json.tx_status === "failed") {
+          console.log(`   ❌ Tx failed on-chain: ${json.tx_status}\n`);
+          return { ok: false, json };
+        }
+        console.log(`   ⏳ Status: ${json.tx_status} — waiting...`);
+      }
+      // 404 = not propagated yet, keep waiting
+    } catch (e) { /* ignore transient errors */ }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  console.log(`   ⚠️ Tx not confirmed within ${maxMs/1000}s — continuing anyway\n`);
+  return { ok: false, timeout: true };
 }
 
 // ─── Derive private key from mnemonic or use raw key ─
@@ -255,17 +289,21 @@ console.log(`
 ║      🤖 Kova AI Agent v3.1 (Operator-Paid x402)     ║
 ╠══════════════════════════════════════════════════════╣
 ║  Agent:    ${agentAddress}  ║
-║  Operator: ${operatorAddress}  ║
-║  Owner:    ${OWNER || '(set from UI)'.padEnd(38)}║
-║  Service:  ${SERVICE_URL.padEnd(38)}║
+║  Operator: ${operatorAddress} ║
+║  Owner:    ${OWNER || '(set from UI)'.padEnd(38)}  ║
+║  Service:  ${SERVICE_URL.padEnd(38)}    ║
 ║  Mode:     Operator signs agent-pay (agent = logic)  ║
 ║  Fee:      2% platform fee per transaction           ║
 ╚══════════════════════════════════════════════════════╝
 `);
 
 if (OPERATOR_KEY === AGENT_KEY) {
-    console.log("⚠️  OPERATOR_PRIVATE_KEY not set — using AGENT_KEY as fallback.");
-    console.log("   For production, set a separate OPERATOR_PRIVATE_KEY in .env.\n");
+  if (process.env.NODE_ENV === "production") {
+    console.error("❌ OPERATOR_KEY and AGENT_KEY are identical in production — aborting");
+    process.exit(1);
+  } else {
+    console.warn("⚠️  OPERATOR_KEY not set — using AGENT_KEY as fallback (dev only)\n");
+  }
 }
 
 // ─── Initialize Telegram Bot ─────────────────────────
@@ -303,15 +341,19 @@ async function discoverServices() {
 
 // ─── Main Execution Pipeline ─────────────────────────
 const runningAgents = new Set();
-const usedNonces = new Set(); // To prevent replay attacks for API calls
 
 // ─── Run a single service endpoint (escrow flow) ─────
 async function runService(endpoint) {
-    if (runningAgents.has(agentAddress)) {
-        console.log(`   ⏳ Agent ${agentAddress} is already running a service. Skipping...`);
+    // Snapshot at call time — agent switch during run won't affect this execution
+    const currentAgent = agentAddress;
+    const currentOwner = OWNER;
+
+    if (runningAgents.has(currentAgent)) {
+        console.log(`   ⏳ Agent ${currentAgent} is already running. Skipping...`);
         return null;
     }
-    runningAgents.add(agentAddress);
+    runningAgents.add(currentAgent);
+
     try {
         console.log(`\n─── Service: ${endpoint} ───────────\n`);
 
@@ -325,10 +367,18 @@ async function runService(endpoint) {
             return null;
         }
 
-        const serviceName = endpoint.replace("/api/", "");
+    const serviceName = endpoint.replace("/api/", "");
     const serviceInfo = discovery.services?.find(s => s.name === serviceName);
-    const price = serviceInfo ? serviceInfo.price : 500_000;
-    const serviceAddress = discovery.address;
+    const serviceAddress = serviceInfo?.address || discovery.address; // ✅ per-service address
+
+    let price = 500_000; // default uSTX
+    if (serviceInfo) {
+        if (serviceInfo.price !== undefined) {
+            price = serviceInfo.price;
+        } else if (serviceInfo.priceSTX !== undefined) {
+            price = Math.round(serviceInfo.priceSTX * 1_000_000);
+        }
+    }
 
     console.log(`   💰 Price: ${(price / 1_000_000).toFixed(4)} STX`);
     console.log(`   📋 Service: ${serviceAddress}\n`);
@@ -336,23 +386,29 @@ async function runService(endpoint) {
     // 2. Request approval via Telegram (if bot is active)
     const amountSTX = price / 1_000_000;
     if (isBotActive()) {
-        console.log(`\n📱 Checking approval (${amountSTX} STX)...\n`);
-        const approved = await requestApproval(
-            price,
-            serviceName || endpoint,
-            serviceAddress
-        );
-        if (!approved) {
-            console.log("   ❌ Payment rejected by owner via Telegram\n");
-            notify(`❌ Agent payment for \`${endpoint}\` was *rejected*.`);
-            return null;
+        const remaining = await fetchCallReadOnlyFunction({
+            contractAddress: CONTRACT,
+            contractName: "agent-wallet-v5",
+            functionName: "get-daily-remaining",
+            functionArgs: [standardPrincipalCV(OWNER), standardPrincipalCV(currentAgent)],
+            network: STACKS_TESTNET,
+            senderAddress: operatorAddress,
+        });
+        const remainingSTX = parseInt(cvToJSON(remaining)?.value || 0) / 1_000_000;
+        const LIMIT_THRESHOLD = 0.1; // STX — tune this
+
+        if (remainingSTX < LIMIT_THRESHOLD) {
+            const approved = await requestApproval(price, serviceName || endpoint, serviceAddress);
+            if (!approved) {
+                console.log("   ❌ Payment rejected by owner via Telegram\n");
+                return null;
+            }
         }
-        console.log(`   ✅ Approved!\n`);
     }
 
     // 3. Validate rules on-chain BEFORE paying
     console.log(`📜 Step 2: Validating rules on-chain...\n`);
-    const valid = await validateSpend(serviceAddress, price);
+    const valid = await validateSpend(serviceAddress, price, currentOwner, currentAgent);
     if (!valid) {
         console.log(`   Kill switch active, service not allowed, or limits exceeded`);
         notify(`Block Agent payment for \`${endpoint}\` - *rules check failed*.`);
@@ -362,7 +418,7 @@ async function runService(endpoint) {
     // 4. Execute agent-pay on escrow contract (autonomous!)
     console.log(`💳 Step 3: Executing agent-pay from escrow...\n`);
     console.log(`   Agent signs contract-call → escrow transfers STX → service receives payment\n`);
-    const txId = await agentPay(serviceAddress, price);
+    const txId = await agentPay(serviceAddress, price, currentOwner, currentAgent);
     if (!txId) {
         console.log(`   ❌ agent-pay failed — check balance or limits`);
         notify(`❌ Payment *failed* for \`${endpoint}\`: agent-pay failed`);
@@ -449,12 +505,12 @@ async function runService(endpoint) {
 
     return data;
     } finally {
-        runningAgents.delete(agentAddress);
+        runningAgents.delete(currentAgent);
     }
 }
 
 // ─── Run all configured services ────────────────────
-async function runAllServices() {
+async function runAllServices(heartbeatSecret = "kova-demo-secret") {
     const timestamp = new Date().toLocaleTimeString();
     console.log(`\n═══════════════════════════════════════════════════`);
     console.log(`  🚀 Agent Run — ${timestamp}`);
@@ -502,7 +558,6 @@ async function runAllServices() {
     }
 
     // Heartbeat pulse for UI active status
-    const HEARTBEAT_SECRET = process.env.HEARTBEAT_SECRET || "kova-demo-secret";
     try {
         await fetch(`http://localhost:${AGENT_API_PORT}/api/agent-heartbeat`, {
             method: "POST",
@@ -614,36 +669,15 @@ function startApiServer() {
 
     // ─── Update Settings dynamically ───
     apiServer.post("/api/settings", async (req, res) => {
-        const { mode, intervalValue, serviceEndpoints, agentIndex } = req.body;
+        const { mode, intervalValue, serviceEndpoints } = req.body;
         if (mode) SCHEDULE_MODE = mode;
         if (intervalValue) SCHEDULE_INTERVAL = parseInt(intervalValue);
         if (serviceEndpoints) {
             SERVICE_ENDPOINTS = serviceEndpoints.split(",").map(s => s.trim()).filter(Boolean);
         }
-        
-        if (agentIndex !== undefined && agentIndex !== null) {
-            const targetIndex = parseInt(agentIndex);
-            if (targetIndex !== activeAgentIndex) {
-                const mnemonic = process.env.AGENT_MNEMONIC;
-                if (mnemonic) {
-                    try {
-                        let wallet = await generateWallet({ secretKey: mnemonic, password: "" });
-                        while (wallet.accounts.length <= targetIndex) {
-                            wallet = generateNewAccount(wallet);
-                        }
-                        const account = wallet.accounts[targetIndex];
-                        AGENT_KEY = account.stxPrivateKey;
-                        agentAddress = getAddressFromPrivateKey(AGENT_KEY, STACKS_TESTNET);
-                        activeAgentIndex = targetIndex;
-                        console.log(`\n🔄 Switched active agent → ${agentAddress} (index ${targetIndex})`);
-                    } catch (err) {
-                        console.error("Failed to switch agent key:", err);
-                    }
-                }
-            }
-        }
 
-        // Accept ownerAddress from UI (the connected Leather wallet)
+        // ❌ DELETE the entire agentIndex block — backend uses .env only
+        
         const { ownerAddress } = req.body;
         if (ownerAddress && ownerAddress !== OWNER) {
             OWNER = ownerAddress;
@@ -651,7 +685,7 @@ function startApiServer() {
         }
         
         console.log(`\n⚙️  Settings updated via UI`);
-        applySchedule();
+        applySchedule(HEARTBEAT_SECRET);
         res.json({ status: "ok", mode: SCHEDULE_MODE, interval: SCHEDULE_INTERVAL, endpoints: SERVICE_ENDPOINTS });
     });
 
@@ -679,7 +713,7 @@ function startApiServer() {
             console.log(`   📜 Validating rules on-chain...`);
             const result = await fetchCallReadOnlyFunction({
                 contractAddress: CONTRACT,
-                contractName: "agent-wallet-v4",
+                contractName: "agent-wallet-v5",
                 functionName: "validate-spend",
                 functionArgs: [
                     standardPrincipalCV(owner),
@@ -720,7 +754,7 @@ function startApiServer() {
             console.log(`   💳 Operator signing agent-pay...`);
             const txOptions = {
                 contractAddress: CONTRACT,
-                contractName: "agent-wallet-v4",
+                contractName: "agent-wallet-v5",
                 functionName: "agent-pay",
                 functionArgs: [
                     standardPrincipalCV(owner),
@@ -796,7 +830,7 @@ function startApiServer() {
                 try {
                     const nonceResult = await fetchCallReadOnlyFunction({
                         contractAddress: CONTRACT,
-                        contractName: "agent-wallet-v4",
+                        contractName: "agent-wallet-v5",
                         functionName: "get-spend-nonce",
                         functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(addr)],
                         network: STACKS_TESTNET,
@@ -812,7 +846,7 @@ function startApiServer() {
                         try {
                             const recResult = await fetchCallReadOnlyFunction({
                                 contractAddress: CONTRACT,
-                                contractName: "agent-wallet-v4",
+                                contractName: "agent-wallet-v5",
                                 functionName: "get-spend-record",
                                 functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(addr), uintCV(i)],
                                 network: STACKS_TESTNET,
@@ -823,9 +857,10 @@ function startApiServer() {
                                 const v = rJson.value.value;
                                 allRecords.push({
                                     nonce: i,
-                                    agent: v.agent.value,
+                                    agent: addr,            // use the loop variable
                                     service: v.service.value,
                                     amount: parseInt(v.amount.value),
+                                    fee: parseInt(v.fee.value),  // also missing — contract stores this
                                     block: parseInt(v.block.value),
                                 });
                             }
@@ -930,7 +965,7 @@ function startApiServer() {
                 try {
                     const result = await fetchCallReadOnlyFunction({
                         contractAddress: CONTRACT,
-                        contractName: "agent-wallet-v4",
+                        contractName: "agent-wallet-v5",
                         functionName: "get-wallet",
                         functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(agent)],
                         network: STACKS_TESTNET,
@@ -985,7 +1020,7 @@ nextAgentIndex = parseInt(process.env.AGENT_ACCOUNT_INDEX || "0") + 2;
 
 let currentIntervalId = null;
 
-function applySchedule() {
+function applySchedule(heartbeatSecret = "kova-demo-secret") {
     if (currentIntervalId) {
         clearInterval(currentIntervalId);
         currentIntervalId = null;
@@ -998,7 +1033,7 @@ function applySchedule() {
     console.log(`📡 Endpoints: ${SERVICE_ENDPOINTS.join(", ")}`);
 
     if (SCHEDULE_MODE === "once") {
-        runAllServices();
+        runAllServices(heartbeatSecret);
         if (isBotActive() || DELIVERY_MODE === "api" || DELIVERY_MODE === "both") {
             console.log("📱 Agent is waiting for schedules. Press Ctrl+C to stop.\n");
         }
@@ -1006,12 +1041,7 @@ function applySchedule() {
         console.log(`🔄 Agent will run every ${SCHEDULE_INTERVAL} minute(s). Press Ctrl+C to stop.\n`);
         const intervalMs = SCHEDULE_INTERVAL * 60 * 1000;
         currentIntervalId = setInterval(async () => {
-            try {
-                await runAllServices();
-            } catch (err) {
-                console.error(`❌ Scheduled run error: ${err.message}`);
-                notify(`❌ Scheduled agent run *failed*: ${err.message}`);
-            }
+            await runAllServices(heartbeatSecret);
         }, intervalMs);
     }
 }
@@ -1024,7 +1054,8 @@ async function main() {
     startApiServer();
 
     if (SCHEDULE_MODE === "once" || SCHEDULE_MODE === "interval") {
-        applySchedule();
+        const heartbeatSecret = process.env.HEARTBEAT_SECRET || "kova-demo-secret";
+        applySchedule(heartbeatSecret);
 
     } else if (SCHEDULE_MODE === "pipeline") {
         // ─── Pipeline mode: execute multi-step workflow ───
@@ -1073,13 +1104,17 @@ async function main() {
 
 // ─── Pipeline Executor ──────────────────────────────
 async function runPipeline(pipeline) {
+    // Snapshot at pipeline start — agent switch mid-pipeline won't corrupt steps
+    const currentAgent = agentAddress;
+    const currentOwner = OWNER;
+
     const stepResults = {};
     const results = {
         pipeline: pipeline.name,
         timestamp: new Date().toISOString(),
         steps: [],
-        agent: agentAddress,
-        owner: OWNER,
+        agent: currentAgent,
+        owner: currentOwner,
     };
 
     console.log(`\n═══════════════════════════════════════════════════`);
@@ -1115,7 +1150,7 @@ async function runPipeline(pipeline) {
             const price = step.maxPrice || 500000;
 
             // Validate on-chain rules
-            const valid = await validateSpend(serviceAddr, price);
+            const valid = await validateSpend(serviceAddr, price, currentOwner, currentAgent);
             if (!valid) {
                 console.log(`   ❌ Rules check failed for ${step.service}`);
                 results.steps.push({ step: stepNum, type: step.type, status: "blocked", reason: "rules check failed" });

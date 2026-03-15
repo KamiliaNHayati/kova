@@ -55,11 +55,41 @@ function toMinutes(value: number, unit: string): number {
 }
 
 const AVAILABLE_SERVICES = [
-    { name: "Price Feed", description: "Real-time BTC, ETH, STX prices", price: "0.5 STX", endpoint: "/api/price-feed", address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663" },
-    { name: "Text Summarizer", description: "AI-powered text summarization", price: "1 STX", endpoint: "/api/summarize", address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663" },
-    { name: "Image Generator", description: "Generate images from text prompts", price: "2 STX", endpoint: "/api/image", address: "ST49MX8AXSS72KPVE9N1YB5J9KZZXRM8J65J7663" },
-    { name: "Sentiment Analysis", description: "Market sentiment from social feeds", price: "1.5 STX", endpoint: "/api/sentiment", address: "ST3NBRSFKX28FQ2ZJ1MAKX58HKHSDNEF55B3MFHQR" },
-    { name: "On-chain Analytics", description: "Whale tracking & DeFi metrics", price: "2 STX", endpoint: "/api/analytics", address: "ST3NBRSFKX28FQ2ZJ1MAKX58HKHSDNEF55B3MFHQR" },
+  { 
+    name: "Price Feed", 
+    description: "Real-time BTC, ETH, STX prices", 
+    price: "0.5 STX", 
+    endpoint: "/api/price-feed", 
+    address: "STEZW9BF0WATG4DXJTHBFP8WKKEANCY70059MHKW" // ✅ matches Services.tsx
+  },
+  { 
+    name: "Text Summarizer", 
+    description: "AI-powered text summarization", 
+    price: "1 STX", 
+    endpoint: "/api/summarize", 
+    address: "ST2RXHMZKSQSTMK15JEQK4KP5N2YE66F999A7FSXE" // ✅ matches Services.tsx
+  },
+  { 
+    name: "Image Generator", 
+    description: "Generate images from text prompts", 
+    price: "2 STX", 
+    endpoint: "/api/image", 
+    address: "ST2CV6BJQW3TJY1JXNC41ZEJH78H3H7Z6V011ZEC6" // ✅ matches Services.tsx
+  },
+  { 
+    name: "Sentiment Analysis", 
+    description: "Market sentiment from social feeds", 
+    price: "1.5 STX", 
+    endpoint: "/api/sentiment", 
+    address: "ST12NKMH3Z1CKW4NV4M76XD3B4JEG1ZWKXXD91HFV" // ✅ matches Services.tsx
+  },
+  { 
+    name: "On-chain Analytics", 
+    description: "Whale tracking & DeFi metrics", 
+    price: "2 STX", 
+    endpoint: "/api/analytics", 
+    address: "ST1T38B636V6BFAHTBMHZE3H4J98M3JZXT9SPY4F7" // ✅ matches Services.tsx
+  },
 ];
 
 export default function Settings() {
@@ -82,21 +112,12 @@ export default function Settings() {
         async function fetchAllowed() {
             if (!address || !selectedAgentAddr) return;
             
-            // Fetch explicit allowed record
-            const EXPLICIT_KEY = "kova-allowed-services-explicit";
-            let explicitList: string[] = [];
-            try {
-                const storeKey = `${EXPLICIT_KEY}-${selectedAgentAddr}`;
-                const data = JSON.parse(localStorage.getItem(storeKey) || "{}");
-                explicitList = data[address] || [];
-            } catch {}
-
             let allowed: string[] = [];
             for (const svc of AVAILABLE_SERVICES) {
                 try {
                     const resp = await isServiceAllowed(address, selectedAgentAddr, svc.address);
                     // Match mathematical allowance and explicit explicit user clicks
-                    if (resp.value === true && explicitList.includes(svc.name)) allowed.push(svc.endpoint);
+                    if (resp.value === true) allowed.push(svc.endpoint);
                 } catch {}
             }
             setAllowedEndpoints(allowed);
@@ -211,8 +232,6 @@ export default function Settings() {
                         mode: scheduleConfig.mode,
                         intervalValue: toMinutes(scheduleConfig.intervalValue, scheduleConfig.intervalUnit),
                         serviceEndpoints: scheduleConfig.serviceEndpoints,
-                        agentIndex: selectedAgent?.index,
-                        agentAddr: agentAddr,
                         ownerAddress: address
                     })
                 });

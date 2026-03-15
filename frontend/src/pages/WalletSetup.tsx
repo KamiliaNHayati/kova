@@ -228,17 +228,17 @@ export default function WalletSetup() {
     setTxError("");
     const agentAddr = savedAgents[selectedAgentIdx]?.address;
     if (!agentAddr) { setTxError("No agent selected"); return; }
+    if (!address) { setTxError("Wallet not connected"); return; }
     const v = isValidAmount(depositAmt);
     if (!v.valid) { setDepositError(v.error!); return; }
     const amt = Math.floor(parseFloat(depositAmt) * 1_000_000);
     setTxStatus("Confirm deposit in your wallet...");
-    // v3: deposit(agent, amount)
-    deposit(agentAddr, amt, (data) => {
+    deposit(agentAddr, amt, address, (data) => {
       if (data && data.error) { setTxError(`Deposit failed: ${data.error}`); setTxStatus(""); }
-      else { 
-        setTxStatus("Deposited!"); setDepositAmt(""); 
+      else {
+        setTxStatus("Deposited!"); setDepositAmt("");
         pushAudit("DEPOSIT", { agentAddr, amount: amt });
-        setTimeout(() => checkWallet(), 3000); 
+        setTimeout(() => checkWallet(), 3000);
       }
     });
   }
@@ -305,6 +305,7 @@ export default function WalletSetup() {
         }
 
         // Tell backend to switch to this agent's index
+        // DELETE this block from handleCreate
         if (targetAgent.index !== undefined) {
           try {
             await fetch("http://localhost:4000/api/activate-agent", {
@@ -312,7 +313,7 @@ export default function WalletSetup() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ index: targetAgent.index }),
             });
-          } catch { /* backend may not be running */ }
+          } catch { }
         }
 
         pushAudit("CREATE_WALLET", { agentAddr: targetAgent.address, dailyLimit: daily, perCallLimit: perCall });

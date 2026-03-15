@@ -77,9 +77,11 @@ export function getSavedAgents(ownerAddress: string): AgentKeypair[] {
  * Save a new agent to localStorage.
  */
 export function saveAgent(ownerAddress: string, agent: AgentKeypair) {
-    const agents = getSavedAgents(ownerAddress);
-    agents.push(agent);
-    localStorage.setItem(`${AGENTS_KEY}-${ownerAddress}`, JSON.stringify(agents));
+  const agents = getSavedAgents(ownerAddress);
+  // add dedup check
+  if (agents.some((a) => a.address === agent.address)) return;
+  agents.push(agent);
+  localStorage.setItem(`${AGENTS_KEY}-${ownerAddress}`, JSON.stringify(agents));
 }
 
 /**
