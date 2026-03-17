@@ -10,9 +10,9 @@ plan:
       epoch: "3.2"
       transactions:
         - contract-publish:
-            contract-name: agent-wallet-v5
+            contract-name: agent-wallet-v7
             expected-sender: STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37
             cost: 169600
-            path: "contracts/agent-wallet-v5.clar"
+            path: "contracts/agent-wallet-v7.clar"
             anchor-block-only: true
             clarity-version: 4

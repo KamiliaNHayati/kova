@@ -12,7 +12,7 @@ import { openContractCall } from "@stacks/connect";
 import { STACKS_TESTNET } from "@stacks/network";
 
 const CONTRACT_ADDRESS = "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37";
-const AGENT_WALLET = "agent-wallet-v5";
+const AGENT_WALLET = "agent-wallet-v7";
 const SERVICE_REGISTRY = "service-registry-v4";
 
 const network = STACKS_TESTNET;
@@ -38,7 +38,7 @@ async function callReadOnly(
   return cvToJSON(result);
 }
 
-// v3: per-agent wallet lookup
+// v7: per-agent wallet lookup
 export async function getWallet(owner: string, agent: string) {
   return callReadOnly(
     AGENT_WALLET,

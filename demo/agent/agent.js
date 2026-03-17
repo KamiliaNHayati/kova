@@ -46,14 +46,16 @@ const {
     getAddressFromPrivateKey,
     fetchCallReadOnlyFunction,
     cvToJSON,
+    TransactionVersion,
+    publicKeyToAddress,  
 } = stxTx;
 import walletSdk from "@stacks/wallet-sdk";
 const { generateWallet, generateNewAccount } = walletSdk;
 import stxNetwork from "@stacks/network";
 const { STACKS_TESTNET } = stxNetwork;
 import stxEnc from "@stacks/encryption";
-const { verifyMessageSignature } = stxEnc;
-import { initBot, requestApproval, notify, isBotActive } from "./bot.js";
+const { verifyMessageSignatureRsv} = stxEnc;
+import { initBot, requestApproval, notify, isBotActive, setOnChatIdRegistered } from "./bot.js";
 
 // ─── State Persistence ───────────────────────────────
 const STATE_FILE = "kova_state.json";
@@ -65,18 +67,39 @@ let appState = {
     }
 };
 
+function saveState() {
+    fs.writeFileSync(STATE_FILE, JSON.stringify({
+        ...appState,
+        derivedAgents: derivedAgents.map(a => ({ address: a.address, index: a.index, label: a.label }))
+    }, null, 2));
+}
+
+// ✅ NOW register callback — appState and saveState are defined
+setOnChatIdRegistered((id) => {
+    appState.telegram.chatId = id;
+    saveState();
+    console.log(`💾 Chat ID auto-saved: ${id}`);
+});
+
+const CONTRACT_NAME = "agent-wallet-v7";
+
+// After loading state, restore derivedAgents
 if (fs.existsSync(STATE_FILE)) {
     try {
         const loaded = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
         appState = { ...appState, ...loaded };
+        // Restore derived agents
+        if (loaded.derivedAgents && Array.isArray(loaded.derivedAgents)) {
+            for (const a of loaded.derivedAgents) {
+                if (!derivedAgents.find(d => d.address === a.address)) {
+                    derivedAgents.push(a);
+                }
+            }
+        }
         console.log("💾 Loaded state from kova_state.json");
     } catch (e) {
         console.error("⚠️ Failed to load state:", e.message);
     }
-}
-
-function saveState() {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(appState, null, 2));
 }
 
 // --- validate-spend: pre-flight check before agent-pay ---
@@ -91,7 +114,7 @@ async function validateSpend(serviceAddress, amount, owner, agent) {
     try {
         const result = await fetchCallReadOnlyFunction({
             contractAddress: CONTRACT,
-            contractName: "agent-wallet-v5",
+            contractName: CONTRACT_NAME,
             functionName: "validate-spend",
             functionArgs,
             network: STACKS_TESTNET,
@@ -141,7 +164,7 @@ async function agentPay(serviceAddress, amount, owner, agent)  {
     try {
         const txOptions = {
             contractAddress: CONTRACT,
-            contractName: "agent-wallet-v5",
+            contractName: CONTRACT_NAME,
             functionName: "agent-pay",
             functionArgs,
             senderKey: OPERATOR_KEY,
@@ -158,7 +181,7 @@ async function agentPay(serviceAddress, amount, owner, agent)  {
         }
         const txid = broadcastResult.txid;
         console.log(`   agent-pay tx: 0x${txid}\n`);
-        const waitRes = await pollTxStatus(txid, 45_000, 2000);
+        const waitRes = await pollTxStatus(txid, 100_000, 3000);
         if (!waitRes.ok && !waitRes.timeout) {
             console.error(`   ❌ Tx aborted on-chain — skipping service call`);
             return null;
@@ -270,8 +293,8 @@ const PIPELINE_FILE = process.env.PIPELINE_FILE || "";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 
 // Data delivery config
-const DELIVERY_MODE = process.env.DELIVERY_MODE || "off"; // off | webhook | api | both
-const WEBHOOK_URL = process.env.WEBHOOK_URL || "";
+let DELIVERY_MODE = process.env.DELIVERY_MODE || "off"; // off | webhook | api | both
+let WEBHOOK_URL = process.env.WEBHOOK_URL || "";
 const AGENT_API_PORT = parseInt(process.env.AGENT_API_PORT || "4000");
 
 // In-memory store for latest results (served by API)
@@ -388,7 +411,7 @@ async function runService(endpoint) {
     if (isBotActive()) {
         const remaining = await fetchCallReadOnlyFunction({
             contractAddress: CONTRACT,
-            contractName: "agent-wallet-v5",
+            contractName: CONTRACT_NAME,
             functionName: "get-daily-remaining",
             functionArgs: [standardPrincipalCV(OWNER), standardPrincipalCV(currentAgent)],
             network: STACKS_TESTNET,
@@ -421,7 +444,7 @@ async function runService(endpoint) {
     const txId = await agentPay(serviceAddress, price, currentOwner, currentAgent);
     if (!txId) {
         console.log(`   ❌ agent-pay failed — check balance or limits`);
-        notify(`❌ Payment *failed* for \`${endpoint}\`: agent-pay failed`);
+        notify(`❌ Payment *failed* for \`${endpoint}\`\nAgent: \`${currentAgent.slice(0,8)}...\`\nReason: agent-pay failed`);
         return null;
     }
 
@@ -498,6 +521,7 @@ async function runService(endpoint) {
 
     notify([
         `✅ *Paid for ${endpoint}*`,
+        `Agent: \`${currentAgent.slice(0, 8)}...${currentAgent.slice(-6)}\``,
         `Amount: *${amountSTX.toFixed(4)} STX*`,
         `TxID: \`${txId.toString().slice(0, 10)}...\``,
         `Method: Escrow agent-pay (autonomous)`,
@@ -669,136 +693,70 @@ function startApiServer() {
 
     // ─── Update Settings dynamically ───
     apiServer.post("/api/settings", async (req, res) => {
-        const { mode, intervalValue, serviceEndpoints } = req.body;
+        const { mode, intervalValue, serviceEndpoints, ownerAddress, agentAddress: reqAgentAddr, deliveryMode, webhookUrl } = req.body;
+        if (deliveryMode) DELIVERY_MODE = deliveryMode;
+        if (webhookUrl) WEBHOOK_URL = webhookUrl;
+        
         if (mode) SCHEDULE_MODE = mode;
         if (intervalValue) SCHEDULE_INTERVAL = parseInt(intervalValue);
         if (serviceEndpoints) {
             SERVICE_ENDPOINTS = serviceEndpoints.split(",").map(s => s.trim()).filter(Boolean);
         }
-
-        // ❌ DELETE the entire agentIndex block — backend uses .env only
-        
-        const { ownerAddress } = req.body;
         if (ownerAddress && ownerAddress !== OWNER) {
             OWNER = ownerAddress;
             console.log(`👤 Switched owner → ${OWNER}`);
         }
-        
+
+        // Switch agent by address if provided
+        if (reqAgentAddr && reqAgentAddr !== agentAddress) {
+            const match = derivedAgents.find(a => a.address === reqAgentAddr);
+            if (match) {
+                const mnemonic = process.env.AGENT_MNEMONIC;
+                if (mnemonic) {
+                    try {
+                        let wallet = await generateWallet({ secretKey: mnemonic, password: "" });
+                        while (wallet.accounts.length <= match.index) wallet = generateNewAccount(wallet);
+                        AGENT_KEY = wallet.accounts[match.index].stxPrivateKey;
+                        agentAddress = getAddressFromPrivateKey(AGENT_KEY, STACKS_TESTNET);
+                        activeAgentIndex = match.index;
+                        console.log(`🔄 Switched to agent ${agentAddress} (index ${match.index})`);
+                    } catch (err) {
+                        console.error("Failed to switch agent:", err);
+                    }
+                }
+            } else {
+                // unknown agent — try to find its index by scanning mnemonic
+                console.log(`🔍 Agent ${reqAgentAddr} not in derivedAgents, scanning mnemonic...`);
+                const mnemonic = process.env.AGENT_MNEMONIC;
+                if (mnemonic) {
+                    let found = false;
+                    for (let idx = 0; idx <= 20; idx++) {
+                        try {
+                            const result = await deriveAgentAtIndex(idx);
+                            if (result.address === reqAgentAddr) {
+                                derivedAgents.push({ ...result, label: `Agent ${derivedAgents.length + 1}` });
+                                AGENT_KEY = (await generateWallet({ secretKey: mnemonic, password: "" }))
+                                    .accounts[idx]?.stxPrivateKey || AGENT_KEY;
+                                // re-derive properly
+                                let wallet = await generateWallet({ secretKey: mnemonic, password: "" });
+                                while (wallet.accounts.length <= idx) wallet = generateNewAccount(wallet);
+                                AGENT_KEY = wallet.accounts[idx].stxPrivateKey;
+                                agentAddress = getAddressFromPrivateKey(AGENT_KEY, STACKS_TESTNET);
+                                activeAgentIndex = idx;
+                                console.log(`✅ Auto-derived agent ${agentAddress} at index ${idx}`);
+                                found = true;
+                                break;
+                            }
+                        } catch (e) {}
+                    }
+                    if (!found) console.warn(`❌ Could not find ${reqAgentAddr} in first 20 indexes`);
+                }            
+            }
+        }
+
         console.log(`\n⚙️  Settings updated via UI`);
         applySchedule(HEARTBEAT_SECRET);
         res.json({ status: "ok", mode: SCHEDULE_MODE, interval: SCHEDULE_INTERVAL, endpoints: SERVICE_ENDPOINTS });
-    });
-
-    // ─── Settle Escrow (x402 operator settlement endpoint) ───
-    // Agent process or external x402 client calls this to request operator-signed settlement.
-    // Flow per sequence diagram:
-    //   1. validate-spend (read-only on-chain)
-    //   2. Telegram approval (if bot active and amount exceeds threshold)
-    //   3. agent-pay (operator signs and broadcasts)
-    //   4. Return payment-response
-    apiServer.post("/api/settle-escrow", async (req, res) => {
-        try {
-            const { owner, agent, service, amount } = req.body;
-            if (!owner || !agent || !service || !amount) {
-                return res.status(400).json({ error: "Missing params: owner, agent, service, amount" });
-            }
-
-            const amountInt = parseInt(amount);
-            const amountSTX = amountInt / 1_000_000;
-            const serviceName = service.slice(0, 10) + "..." + service.slice(-6);
-
-            console.log(`\n🔄 Settle-escrow request: ${amountSTX.toFixed(4)} STX → ${serviceName}`);
-
-            // 1. Validate rules on-chain first
-            console.log(`   📜 Validating rules on-chain...`);
-            const result = await fetchCallReadOnlyFunction({
-                contractAddress: CONTRACT,
-                contractName: "agent-wallet-v5",
-                functionName: "validate-spend",
-                functionArgs: [
-                    standardPrincipalCV(owner),
-                    standardPrincipalCV(agent),
-                    standardPrincipalCV(service),
-                    uintCV(amountInt),
-                ],
-                network: STACKS_TESTNET,
-                senderAddress: operatorAddress,
-            });
-            const json = cvToJSON(result);
-            if (!json.success) {
-                console.log(`   ❌ Rules check failed: ${JSON.stringify(json)}`);
-                return res.status(400).json({ error: "Rules check failed", details: json });
-            }
-            console.log(`   ✅ Rules check passed`);
-
-            // 2. Telegram approval (if bot is active)
-            if (isBotActive()) {
-                console.log(`   📱 Checking Telegram approval (${amountSTX.toFixed(4)} STX)...`);
-                const approved = await requestApproval(
-                    amountInt,
-                    serviceName,
-                    service
-                );
-                if (!approved) {
-                    console.log(`   ❌ Payment REJECTED by owner via Telegram`);
-                    notify(`❌ Settlement *rejected*: ${amountSTX.toFixed(4)} STX → \`${serviceName}\``);
-                    return res.status(403).json({
-                        error: "Payment rejected by owner",
-                        reason: "telegram_rejected",
-                    });
-                }
-                console.log(`   ✅ Telegram approved`);
-            }
-
-            // 3. Operator signs and broadcasts agent-pay
-            console.log(`   💳 Operator signing agent-pay...`);
-            const txOptions = {
-                contractAddress: CONTRACT,
-                contractName: "agent-wallet-v5",
-                functionName: "agent-pay",
-                functionArgs: [
-                    standardPrincipalCV(owner),
-                    standardPrincipalCV(agent),
-                    standardPrincipalCV(service),
-                    uintCV(amountInt),
-                ],
-                senderKey: OPERATOR_KEY,
-                network: STACKS_TESTNET,
-                anchorMode: AnchorMode.Any,
-                postConditionMode: PostConditionMode.Allow,
-                fee: 5000n,
-            };
-            const tx = await makeContractCall(txOptions);
-            const broadcastResult = await broadcastTransaction({ transaction: tx, network: STACKS_TESTNET });
-            if (broadcastResult.error) {
-                console.error(`   ❌ agent-pay broadcast failed: ${broadcastResult.error}`);
-                return res.status(500).json({ error: "Broadcast failed", details: broadcastResult.error });
-            }
-
-            const txId = `0x${broadcastResult.txid}`;
-            console.log(`   ✅ agent-pay settled: ${txId}`);
-
-            // Notify via Telegram
-            notify([
-                `✅ *Settlement complete*`,
-                `Amount: *${amountSTX.toFixed(4)} STX*`,
-                `Service: \`${serviceName}\``,
-                `TxID: \`${txId.slice(0, 12)}...\``,
-                `Payer: operator`,
-            ].join("\n"));
-
-            // 4. Return x402-compatible payment-response
-            res.json({
-                success: true,
-                transaction: txId,
-                payer: operatorAddress,
-                network: "stacks:2147483648",
-                scheme: "escrow",
-            });
-        } catch (err) {
-            console.error(`   ❌ settle-escrow error: ${err.message}`);
-            res.status(500).json({ error: err.message });
-        }
     });
 
     // ─── Phase 4 APIs: Info, Activity, Config, Heartbeats ───
@@ -814,13 +772,19 @@ function startApiServer() {
         try {
             const { owner, agent, limit = 20, offset = 0 } = req.query;
             if (!owner) return res.status(400).json({ error: "owner missing" });
-            
+
             let requestedAgents = [];
-            if (agent && agent !== "ALL") {
-                requestedAgents.push(agent);
-            } else {
+            if (!agent || agent === "ALL") {
+                // fallback to derivedAgents if no specific agents provided
                 requestedAgents = derivedAgents.map(a => a.address);
-                if (agentAddress && !requestedAgents.includes(agentAddress)) requestedAgents.push(agentAddress);
+                if (agentAddress && !requestedAgents.includes(agentAddress)) {
+                    requestedAgents.push(agentAddress);
+                }
+            } else if (agent.includes(",")) {
+                // comma-separated list from frontend
+                requestedAgents = agent.split(",").map(a => a.trim()).filter(Boolean);
+            } else {
+                requestedAgents = [agent];
             }
 
             const allRecords = [];
@@ -830,7 +794,7 @@ function startApiServer() {
                 try {
                     const nonceResult = await fetchCallReadOnlyFunction({
                         contractAddress: CONTRACT,
-                        contractName: "agent-wallet-v5",
+                        contractName: CONTRACT_NAME,
                         functionName: "get-spend-nonce",
                         functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(addr)],
                         network: STACKS_TESTNET,
@@ -846,7 +810,7 @@ function startApiServer() {
                         try {
                             const recResult = await fetchCallReadOnlyFunction({
                                 contractAddress: CONTRACT,
-                                contractName: "agent-wallet-v5",
+                                contractName: CONTRACT_NAME,
                                 functionName: "get-spend-record",
                                 functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(addr), uintCV(i)],
                                 network: STACKS_TESTNET,
@@ -901,20 +865,17 @@ function startApiServer() {
 
             // Verify signature using @stacks/encryption
             const message = `kova:link-telegram:${owner}:${nonce}`;
-            const isValid = verifyMessageSignature({
-                message,
-                signature,
-                publicKey
-            });
+            const isValid = verifyMessageSignatureRsv({ message, signature, publicKey });
 
             if (!isValid) {
-                console.error("❌ Invalid authorization signature for Telegram config.");
-                return res.status(401).json({ error: "Invalid signature payload." });
+                return res.status(401).json({ error: "Invalid signature." });
             }
 
-            const derivedAddress = stxTx.getAddressFromPublicKey(publicKey, STACKS_TESTNET);
+            // Derive address from public key and verify it matches owner
+            const derivedAddress = publicKeyToAddress(publicKey, "testnet");
+
             if (derivedAddress !== owner) {
-                return res.status(401).json({ error: "Signer address does not match owner profile." });
+                return res.status(401).json({ error: "Signer address does not match owner." });
             }
 
             await initBot(botToken, chatId, parseFloat(thresholdSTX || "0.05"));
@@ -928,7 +889,7 @@ function startApiServer() {
             res.json({ success: true });
         } catch (err) {
             res.status(500).json({ error: err.message });
-        }
+        } 
     });
 
     const agentHeartbeats = new Map();
@@ -965,7 +926,7 @@ function startApiServer() {
                 try {
                     const result = await fetchCallReadOnlyFunction({
                         contractAddress: CONTRACT,
-                        contractName: "agent-wallet-v5",
+                        contractName: CONTRACT_NAME,
                         functionName: "get-wallet",
                         functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(agent)],
                         network: STACKS_TESTNET,

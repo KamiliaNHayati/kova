@@ -38,7 +38,14 @@ export default function Activity() {
   async function loadRecords(currentOffset: number) {
     setLoading(true);
     try {
-      const resp = await fetch(`http://localhost:4000/api/activity?owner=${address}&agent=${selectedAgentAddr}&limit=${LIMIT}&offset=${currentOffset}`);
+      // Build agent param — pass all known agents for ALL, or specific one
+      const agentParam = selectedAgentAddr === "ALL"
+          ? agents.map(a => a.address).join(",")
+          : selectedAgentAddr;
+
+      const resp = await fetch(
+          `http://localhost:4000/api/activity?owner=${address}&agent=${agentParam}&limit=${LIMIT}&offset=${currentOffset}`
+        );
       if (resp.ok) {
         const data = await resp.json();
         if (currentOffset === 0) {

@@ -5,15 +5,15 @@ authors = []
 telemetry = false
 cache_dir = '.\.cache'
 requirements = []
-[contracts.agent-wallet-v5]
-path = 'contracts/agent-wallet-v5.clar'
+[contracts.agent-wallet-v7]
+path = 'contracts/agent-wallet-v7.clar'
 clarity_version = 4
-epoch = 'latest'
+epoch = '3.3'
 
 [contracts.service-registry-v4]
 path = 'contracts/service-registry-v4.clar'
 clarity_version = 4
-epoch = 'latest'
+epoch = '3.3'
 [repl.analysis]
 passes = ['check_checker']
 

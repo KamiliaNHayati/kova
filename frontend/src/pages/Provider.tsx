@@ -53,22 +53,24 @@ export default function Provider() {
         setLoading(true);
         try {
             const countResult = await getServiceCount(address!);
-            const count = countResult?.value || 0;
+            const count = parseInt(countResult?.value || "0");
             const svcs: ServiceInfo[] = [];
             for (let i = 0; i < Math.min(count, 10); i++) {
                 const svc = await getUserService(address!, i);
-                if (svc?.value) {
+                const v = svc?.value?.value; // ✅ drill into nested value
+                if (v) {
                     svcs.push({
-                        name: svc.value.name?.value || "",
-                        description: svc.value.description?.value || "",
-                        url: svc.value.url?.value || "",
-                        pricePerCall: parseInt(svc.value["price-per-call"]?.value || "0"),
-                        active: svc.value.active?.value || false,
+                        name: v.name?.value || "",
+                        description: v.description?.value || "",
+                        url: v.url?.value || "",
+                        pricePerCall: parseInt(v["price-per-call"]?.value || "0"),
+                        active: v.active?.value === true, // ✅ explicit boolean check
                     });
                 }
             }
             setServices(svcs);
-        } catch {
+        } catch (e) {
+            console.error(e);
             setServices([]);
         }
         setLoading(false);
@@ -100,16 +102,31 @@ export default function Provider() {
         }
     }
 
-    function handleRegister() {
+    async function handleRegister() {
         if (!name || !url || !price) return;
+        
+        // Register in server.js for immediate discovery
+        try {
+            await fetch("http://localhost:3402/api/register-service", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: name.toLowerCase().replace(/\s+/g, "-"),
+                    description,
+                    url,
+                    priceSTX: (parseInt(price) / 1_000_000).toString(),
+                    address: address, // provider's wallet address
+                })
+            });
+        } catch (e) {
+            console.error("Failed to register in server:", e);
+        }
+
+        // Also register on-chain
         registerService(name, description, url, parseInt(price), () => {
             setShowRegister(false);
-            setName("");
-            setDescription("");
-            setUrl("");
-            setPrice("");
-            setTestResult("idle");
-            setTestMessage("");
+            setName(""); setDescription(""); setUrl(""); setPrice("");
+            setTestResult("idle"); setTestMessage("");
             setTimeout(loadServices, 3000);
         });
     }

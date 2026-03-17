@@ -232,7 +232,10 @@ export default function Settings() {
                         mode: scheduleConfig.mode,
                         intervalValue: toMinutes(scheduleConfig.intervalValue, scheduleConfig.intervalUnit),
                         serviceEndpoints: scheduleConfig.serviceEndpoints,
-                        ownerAddress: address
+                        ownerAddress: address,
+                        agentAddress: agentAddr,
+                        deliveryMode: scheduleConfig.deliveryMode,    
+                        webhookUrl: scheduleConfig.webhookUrl,
                     })
                 });
             } catch { console.log("Backend not running"); }
@@ -550,6 +553,9 @@ export default function Settings() {
                                     <Save className="w-4 h-4" />
                                     Save Settings
                                 </button>
+                                <div className="p-3 rounded-lg bg-surface-2/10 border border-border/20 text-[10px] text-text-muted">
+                                💡 All payments are also logged to your Telegram when notifications are enabled — regardless of delivery mode.
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -760,7 +766,7 @@ export default function Settings() {
                                 <label className="block text-sm font-medium mb-3">Delivery Mode</label>
                                 <div className="grid grid-cols-2 gap-3">
                                     {[
-                                        { value: "off", label: "Terminal Only", desc: "Just log to terminal", icon: "📺" },
+                                        { value: "off", label: "Terminal Only", desc: "Logs in agent.js terminal (dev)", icon: "📺" },
                                         { value: "webhook", label: "Webhook", desc: "POST results to your URL", icon: "📤" },
                                         { value: "api", label: "API Server", desc: "Serve at localhost:4000", icon: "🌐" },
                                         { value: "both", label: "Both", desc: "Webhook + API combined", icon: "⚡" },

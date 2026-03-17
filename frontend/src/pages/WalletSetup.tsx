@@ -100,12 +100,18 @@ export default function WalletSetup() {
   const [txStatus, setTxStatus] = useState("");
   const [txError, setTxError] = useState("");
 
+  // Effect 1 — runs on address change
   useEffect(() => {
     if (!address) return;
-    checkWallet();
     setSavedAgents(getSavedAgents(address));
     fetchOperatorStatus();
   }, [address]);
+
+  // Effect 2 — runs when agent selection changes
+  useEffect(() => {
+    if (!address) return;
+    checkWallet();
+  }, [address, selectedAgentIdx]);
 
   useEffect(() => {
     let active = true;
@@ -306,15 +312,6 @@ export default function WalletSetup() {
 
         // Tell backend to switch to this agent's index
         // DELETE this block from handleCreate
-        if (targetAgent.index !== undefined) {
-          try {
-            await fetch("http://localhost:4000/api/activate-agent", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ index: targetAgent.index }),
-            });
-          } catch { }
-        }
 
         pushAudit("CREATE_WALLET", { agentAddr: targetAgent.address, dailyLimit: daily, perCallLimit: perCall });
         
@@ -356,7 +353,7 @@ export default function WalletSetup() {
     });
   }
 
-  async function handleGenerateAgent() {
+  async function handleGenerateAgent() {   
     setTxError("");
     if (savedAgents.length >= 5) {
       setTxError("Maximum 5 agents per wallet");
@@ -365,10 +362,11 @@ export default function WalletSetup() {
 
     setTxStatus("Generating agent from backend...");
     try {
-      const nextIdx = savedAgents.length > 0 
-        ? Math.max(...savedAgents.map(a => a.index !== undefined ? a.index : -1)) + 1 
-        : undefined; // Backend will default to .env + 2 if it's the very first agent
-      const agent = await createAgentFromBackend(`Agent ${savedAgents.length + 1}`, nextIdx);
+      // Instead of calculating nextIdx locally, ask backend
+      const activeResp = await fetch("http://localhost:4000/api/active-agent");
+      const activeData = await activeResp.json();
+      // backend tracks nextAgentIndex correctly
+      const agent = await createAgentFromBackend(`Agent ${savedAgents.length + 1}`, undefined); // let backend decide
 
       setTxStatus("Confirm in your wallet...");
       // v3: createWallet creates an isolated wallet per agent

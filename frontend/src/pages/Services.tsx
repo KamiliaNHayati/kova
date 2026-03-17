@@ -4,6 +4,8 @@ import {
   allowService,
   disallowService,
   isServiceAllowed,
+  getServiceCount,
+  getUserService,
 } from "../lib/contracts";
 import { getSavedAgents, type AgentKeypair } from "../lib/agentKeys";
 import {
@@ -101,6 +103,14 @@ function saveServices(owner: string, agentAddr: string, services: string[]) {
   } catch {}
 }
 
+function detectCategory(name: string, description: string): string {
+    const text = (name + " " + description).toLowerCase();
+    if (text.includes("price") || text.includes("feed") || text.includes("data") || text.includes("analytic")) return "Data";
+    if (text.includes("ai") || text.includes("summar") || text.includes("image") || text.includes("sentiment") || text.includes("llm")) return "AI";
+    if (text.includes("weather") || text.includes("news") || text.includes("market")) return "Data";
+    return "Custom";
+}
+
 interface AllowedService {
   address: string;
   name?: string;
@@ -120,6 +130,7 @@ export default function Services() {
   const [agents, setAgents] = useState<AgentKeypair[]>([]);
   const [selectedAgentIdx, setSelectedAgentIdx] = useState(0);
   const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
+  const [onChainServices, setOnChainServices] = useState<any[]>([]);
 
   // ✅ These go HERE — after state, inside the component
   const agentAddr = agents[selectedAgentIdx]?.address;
@@ -182,6 +193,38 @@ export default function Services() {
     setLoading(false);
   }
 
+  useEffect(() => {
+      if (!address || agents.length === 0) return;
+      loadAllowedServices();
+      loadOnChainServices();
+  }, [selectedAgentIdx, agents, address]);
+
+  async function loadOnChainServices() {
+      try {
+          const countResult = await getServiceCount(address!);
+          const count = parseInt(countResult?.value || "0");
+          const svcs = [];
+          for (let i = 0; i < Math.min(count, 20); i++) {
+              const svc = await getUserService(address!, i);
+              const v = svc?.value?.value;
+              if (v && v.active?.value === true) {
+                  svcs.push({
+                      name: v.name?.value || "",
+                      description: v.description?.value || "",
+                      address: address!, // provider's address = payment recipient
+                      price: `${(parseInt(v["price-per-call"]?.value || "0") / 1_000_000).toFixed(2)} STX`,
+                      category: detectCategory(v.name?.value || "", v.description?.value || ""),
+                      icon: Zap,
+                      url: v.url?.value || "",
+                      verified: false,
+                  });
+              }
+          }
+          setOnChainServices(svcs);
+      } catch (e) {
+          console.error("Failed to load on-chain services:", e);
+      }
+  }
   function handleAllow(serviceAddr: string, serviceName: string) {
     const agentAddr = agents[selectedAgentIdx]?.address;
     if (!address) { setTxStatus("Connect wallet first"); return; }
@@ -296,16 +339,22 @@ export default function Services() {
     return services.some(s => s.address === addr && s.allowed);
   }
 
-  const categories = ["All", ...new Set(MARKETPLACE_SERVICES.map((s) => s.category))];
+  // const categories = ["All", ...new Set(MARKETPLACE_SERVICES.map((s) => s.category))];
 
-  const filteredServices = MARKETPLACE_SERVICES.filter((s) => {
-    const matchesSearch =
-      searchQuery === "" ||
-      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.description.toLowerCase().includes(searchQuery.toLowerCase());
+  const allServices = [
+      ...MARKETPLACE_SERVICES,
+      ...onChainServices.filter(s => 
+          !MARKETPLACE_SERVICES.some(m => m.name === s.name)
+      )
+  ];
+
+  const filteredServices = allServices.filter((s) => {
+    const matchesSearch = searchQuery === "" ||
+        s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        s.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = categoryFilter === "All" || s.category === categoryFilter;
     return matchesSearch && matchesCategory;
-  });
+});
 
   return (
     <div>
@@ -328,6 +377,44 @@ export default function Services() {
           </button>
         </div>
       </div>
+
+      {/* Add agent selector here */}
+      {agents.length > 0 && (
+        <div className="mb-6 max-w-sm relative">
+          <label className="block text-xs text-text-muted mb-1.5 uppercase">For Agent</label>
+          <button
+            onClick={() => setAgentDropdownOpen(!agentDropdownOpen)}
+            className="w-full flex items-center justify-between px-4 py-3 bg-surface border border-border rounded-xl hover:border-accent/40 transition-all"
+          >
+            <div className="flex items-center gap-3">
+              <Bot className="w-4 h-4 text-warning" />
+              <div className="text-left">
+                <p className="text-sm font-medium text-white">{agents[selectedAgentIdx]?.label || "Agent"}</p>
+                <p className="text-[10px] font-mono text-text-muted truncate max-w-[220px]">{agentAddr || "—"}</p>
+              </div>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-text-muted transition-transform ${agentDropdownOpen ? "rotate-180" : ""}`} />
+          </button>
+          {agentDropdownOpen && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-xl overflow-hidden shadow-xl z-50">
+              {agents.map((agent, idx) => (
+                <button
+                  key={agent.address}
+                  onClick={() => { setSelectedAgentIdx(idx); setAgentDropdownOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-accent/5 transition-colors text-left ${idx === selectedAgentIdx ? "bg-accent/10 border-l-2 border-accent" : ""}`}
+                >
+                  <Bot className="w-4 h-4 text-warning flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-white">{agent.label}</p>
+                    <p className="text-[10px] font-mono text-text-muted truncate max-w-[220px]">{agent.address}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <p className="text-text-muted text-sm mb-6">
         {tab === "marketplace"
           ? "Browse available X402 services and add them to your allowlist"
@@ -361,7 +448,7 @@ export default function Services() {
               />
             </div>
             <div className="flex gap-1.5">
-              {categories.map((cat) => (
+              {["All", ...new Set(allServices.map(s => s.category))].map((cat) => (
                 <button
                   key={cat}
                   onClick={() => setCategoryFilter(cat)}
