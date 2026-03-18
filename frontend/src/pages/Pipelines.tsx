@@ -17,6 +17,7 @@ import {
     Zap,
     Settings2,
     Clock,
+    AlertCircle
 } from "lucide-react";
 
 import { isServiceAllowed } from "../lib/contracts";
@@ -54,6 +55,7 @@ interface Pipeline {
     webhookUrl?: string;
     scheduleInterval?: number;
     createdAt: string;
+    owner?: string; 
 }
 
 // ─── Marketplace Service type ───
@@ -67,10 +69,22 @@ interface MarketService {
 
 // Hardcoded marketplace services — same as Services page
 // In production, this would come from the on-chain service registry
-const HARDCODED_MARKETPLACE: MarketService[] = [
-    { name: "Price Feed", url: "http://localhost:3402/api/price-feed", pricePerCall: 500000, description: "Real-time crypto price data (BTC, ETH, STX)", ownerAddress: "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37" },
-    { name: "Text Summarizer", url: "http://localhost:3402/api/summarize", pricePerCall: 1000000, description: "AI-powered text summarization", ownerAddress: "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37" },
-];
+// const HARDCODED_MARKETPLACE: MarketService[] = [
+//     { 
+//         name: "Price Feed", 
+//         url: "http://localhost:3402/api/price-feed", 
+//         pricePerCall: 500000, 
+//         description: "Real-time crypto price data",
+//         ownerAddress: "STEZW9BF0WATG4DXJTHBFP8WKKEANCY70059MHKW" // ✅ actual service address
+//     },
+//     { 
+//         name: "Text Summarizer", 
+//         url: "http://localhost:3402/api/summarize", 
+//         pricePerCall: 1000000, 
+//         description: "AI-powered text summarization",
+//         ownerAddress: "ST2RXHMZKSQSTMK15JEQK4KP5N2YE66F999A7FSXE" // ✅
+//     },
+// ];
 
 // ─── Constants ───
 const OPERATORS = [
@@ -82,10 +96,10 @@ const OPERATORS = [
 ];
 
 const LLM_MODELS = [
-    { value: "google/gemini-2.0-flash-exp:free", label: "Gemini 2.0 Flash (Free)" },
+    { value: "openrouter/free", label: "Free Models Router (auto-select)" },
     { value: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 70B (Free)" },
     { value: "mistralai/mistral-small-3.1-24b-instruct:free", label: "Mistral Small 3.1 (Free)" },
-    { value: "deepseek/deepseek-r1:free", label: "DeepSeek R1 (Free)" },
+    { value: "nvidia/llama-3.1-nemotron-70b-instruct:free", label: "Nemotron 70B (Free)" },
 ];
 
 // ─── Storage helpers ─────────────────────────────────
@@ -107,6 +121,8 @@ export default function Pipelines() {
     const [pipelines, setPipelines] = useState<Pipeline[]>(loadPipelines());
     const [showBuilder, setShowBuilder] = useState(false);
     const [expandedPipeline, setExpandedPipeline] = useState<string | null>(null);
+    const [runResults, setRunResults] = useState<Record<string, any>>({});
+    const [runningId, setRunningId] = useState<string | null>(null);
 
     // Builder state
     const [pipelineName, setPipelineName] = useState("");
@@ -123,28 +139,29 @@ export default function Pipelines() {
         if (address) loadMarketplaceServices();
     }, [address]);
 
+    // Remove HARDCODED_MARKETPLACE constant entirely
+
     async function loadMarketplaceServices() {
         if (!address) return;
         setLoadingMarket(true);
-        const agents = getSavedAgents(address);
-        const allowedServices: MarketService[] = [];
-
-        for (const svc of HARDCODED_MARKETPLACE) {
-            let isAllowedByAnyAgent = false;
-            for (const agent of agents) {
-                try {
-                    const resp = await isServiceAllowed(address, agent.address, svc.ownerAddress);
-                    if (resp.value === true) {
-                        isAllowedByAnyAgent = true;
-                        break;
-                    }
-                } catch { }
+        
+        try {
+            const resp = await fetch("http://localhost:3402/api/services");
+            if (resp.ok) {
+                const data = await resp.json();
+                const svcs = (data.services || [])
+                    .filter((s: any) => s.active)
+                    .map((s: any) => ({
+                        name: s.name,
+                        url: s.url,
+                        pricePerCall: s.price || Math.round(parseFloat(s.priceSTX || "0") * 1_000_000),
+                        description: s.description,
+                        ownerAddress: s.address,
+                    }));
+                setMarketServices(svcs);
             }
-            if (isAllowedByAnyAgent) {
-                allowedServices.push(svc);
-            }
-        }
-        setMarketServices(allowedServices);
+        } catch {}
+        
         setLoadingMarket(false);
     }
 
@@ -170,7 +187,7 @@ export default function Pipelines() {
                 id: `llm-${Date.now()}`,
                 type: "llm-analysis",
                 llmProvider: "openrouter-free",
-                llmModel: LLM_MODELS[0].value,
+                llmModel: "mistralai/mistral-small-3.1-24b-instruct:free",
                 llmPrompt: "Analyze the data from previous steps and provide a clear recommendation with reasoning.",
             },
         ]);
@@ -207,6 +224,7 @@ export default function Pipelines() {
             webhookUrl: delivery === "webhook" ? webhookUrl : undefined,
             scheduleInterval,
             createdAt: new Date().toISOString(),
+            owner: address!, // ✅ add this
         };
 
         const updated = [...pipelines, pipeline];
@@ -392,26 +410,22 @@ export default function Pipelines() {
                                                             {marketServices.map((svc, j) => (
                                                                 <button
                                                                     key={j}
-                                                                    onClick={() =>
-                                                                        selectFromMarketplace(i, svc)
-                                                                    }
-                                                                    className={`flex items-center justify-between p-3 rounded-lg text-left transition-all ${step.service === svc.name
+                                                                    onClick={() => selectFromMarketplace(i, svc)}
+                                                                    className={`flex items-center justify-between p-3 rounded-lg text-left transition-all w-full ${
+                                                                        step.service === svc.name
                                                                             ? "bg-accent/10 border border-accent/30"
                                                                             : "bg-white/5 border border-border/20 hover:bg-white/10"
-                                                                        }`}
+                                                                    }`}
                                                                 >
                                                                     <div>
-                                                                        <p className="text-sm text-white font-medium">
-                                                                            {svc.name}
-                                                                        </p>
-                                                                        <p className="text-xs text-text-muted">
-                                                                            {svc.description}
-                                                                        </p>
+                                                                        <p className="text-sm text-white font-medium">{svc.name}</p>
+                                                                        <p className="text-xs text-text-muted">{svc.description}</p>
                                                                     </div>
-                                                                    <span className="text-xs font-mono text-accent">
-                                                                        {(svc.pricePerCall / 1_000_000).toFixed(2)}{" "}
-                                                                        STX
-                                                                    </span>
+                                                                    <div className="text-right">
+                                                                        <span className="text-xs font-mono text-accent block">
+                                                                            {(svc.pricePerCall / 1_000_000).toFixed(2)} STX
+                                                                        </span>
+                                                                    </div>
                                                                 </button>
                                                             ))}
                                                         </div>
@@ -666,14 +680,20 @@ export default function Pipelines() {
                                     key={mode}
                                     onClick={() => setDelivery(mode)}
                                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${delivery === mode
-                                            ? "bg-accent/20 text-accent border border-accent/30"
-                                            : "bg-white/5 text-text-muted border border-border/30 hover:bg-white/10"
-                                        }`}
+                                        ? "bg-accent/20 text-accent border border-accent/30"
+                                        : "bg-white/5 text-text-muted border border-border/30 hover:bg-white/10"
+                                    }`}
                                 >
-                                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                                    {mode === "terminal" ? "Terminal (backend)" : mode.charAt(0).toUpperCase() + mode.slice(1)}
                                 </button>
                             ))}
                         </div>
+                        {delivery === "terminal" && (
+                            <p className="text-[10px] text-text-muted mt-2 flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3" />
+                                Results will appear in agent.js terminal (dev) — not in the browser.
+                            </p>
+                        )}
                         {delivery === "webhook" && (
                             <input
                                 type="text"
@@ -683,31 +703,37 @@ export default function Pipelines() {
                                 className="w-full px-4 py-3 bg-black/30 border border-border/50 rounded-xl text-white placeholder-text-muted/50 focus:border-accent focus:outline-none"
                             />
                         )}
-                    </div>
-
-                    {/* Save */}
-                    <div className="flex gap-3 pt-2">
-                        <button
-                            onClick={savePipeline}
-                            disabled={!pipelineName || steps.length === 0}
-                            className="px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-xl font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            Save Pipeline
-                        </button>
-                        <button
-                            onClick={() => {
-                                setShowBuilder(false);
-                                setPipelineName("");
-                                setSteps([]);
-                            }}
-                            className="px-6 py-3 bg-white/5 hover:bg-white/10 text-text-muted rounded-xl transition-all"
-                        >
-                            Cancel
-                        </button>
-                    </div>
-                </div>
+                        {delivery === "api" && (
+                            <div className="p-3 rounded-xl bg-black/20 border border-border/30 text-xs text-text-muted">
+                                <p className="font-medium text-white mb-1">🌐 API Server</p>
+                                <p>Results will be served at:</p>
+                                <code className="text-accent font-mono">http://localhost:4000/api/latest</code>
+                                <p className="mt-1">Any app or browser can fetch this URL after the pipeline runs.</p>
+                            </div>
+                        )}
+                        {/* Save */}
+                        <div className="flex gap-3 pt-2">
+                            <button
+                                onClick={savePipeline}
+                                disabled={!pipelineName || steps.length === 0}
+                                className="px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-xl font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                Save Pipeline
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setShowBuilder(false);
+                                    setPipelineName("");
+                                    setSteps([]);
+                                }}
+                                className="px-6 py-3 bg-white/5 hover:bg-white/10 text-text-muted rounded-xl transition-all"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>             
+                </div>  
             )}
-
             {/* Pipeline List */}
             <div className="space-y-4">
                 <h2 className="text-xl font-semibold text-white">Your Pipelines</h2>
@@ -778,6 +804,44 @@ export default function Pipelines() {
                                         ) : (
                                             <ChevronDown className="w-5 h-5 text-text-muted" />
                                         )}
+                                        <button                                        // Run button:
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            setRunningId(pipeline.id);
+                                            try {
+                                                await fetch("http://localhost:4000/api/run-pipeline", {
+                                                    method: "POST",
+                                                    headers: { "Content-Type": "application/json" },
+                                                    body: JSON.stringify({ pipeline })
+                                                });
+                                                // Poll every 5s for up to 3 minutes
+                                                const pollInterval = setInterval(async () => {
+                                                    try {
+                                                        const latest = await fetch("http://localhost:4000/api/latest");
+                                                        const data = await latest.json();
+                                                        if (data.pipeline) {  // ✅ just check if pipeline data exists
+                                                            setRunResults(prev => ({ ...prev, [pipeline.id]: data.pipeline }));
+                                                            setRunningId(null);
+                                                            clearInterval(pollInterval);
+                                                        }
+                                                    } catch {}
+                                                }, 5000);
+                                                setTimeout(() => { 
+                                                    clearInterval(pollInterval); 
+                                                    setRunningId(null); 
+                                                }, 300_000); // 5 minutes }, 180000);
+                                            } catch {
+                                                setRunningId(null);
+                                            }
+                                        }}
+                                        className={`p-2 rounded-lg transition-colors ${runningId === pipeline.id ? "bg-warning/20" : "bg-accent/10 hover:bg-accent/20"}`}
+                                        title="Run now"
+                                        >
+                                        {runningId === pipeline.id 
+                                            ? <div className="w-4 h-4 border-2 border-warning border-t-transparent rounded-full animate-spin" />
+                                            : <Play className="w-4 h-4 text-accent" />
+                                        }
+                                        </button>
                                     </div>
                                 </div>
 
@@ -823,17 +887,39 @@ export default function Pipelines() {
                                         ))}
 
                                         {/* Run instruction */}
-                                        <div className="mt-4 p-3 rounded-xl bg-black/30 border border-border/20">
-                                            <p className="text-xs text-text-muted mb-1.5 font-medium">
-                                                Run this pipeline:
+                                        <div className="mt-4 p-3 rounded-xl bg-accent/5 border border-accent/10">
+                                            <p className="text-xs text-text-muted">
+                                                Click <span className="text-accent font-bold">▶</span> to run. Results appear below after completion.
                                             </p>
-                                            <code className="text-xs text-accent font-mono">
-                                                SCHEDULE_MODE=pipeline PIPELINE_FILE=./{pipeline.name
-                                                    .replace(/\s+/g, "-")
-                                                    .toLowerCase()}
-                                                .json node agent.js
-                                            </code>
                                         </div>
+
+                                        {/* Results */}
+                                        {runningId === pipeline.id && (
+                                            <div className="mt-3 p-3 rounded-xl bg-warning/5 border border-warning/20 flex items-center gap-2">
+                                                <div className="w-3 h-3 border-2 border-warning border-t-transparent rounded-full animate-spin" />
+                                                <p className="text-xs text-warning">Pipeline running...</p>
+                                            </div>
+                                        )}
+                                        {runResults[pipeline.id] && (
+                                            <div className="mt-3 p-4 rounded-xl bg-success/5 border border-success/20">
+                                                <p className="text-xs font-medium text-success mb-2">✅ Last Run Results</p>
+                                                {runResults[pipeline.id].steps?.map((step: any, i: number) => (
+                                                    <div key={i} className="mb-2 text-xs">
+                                                        <span className={`font-medium ${step.status === "success" ? "text-success" : "text-danger"}`}>
+                                                            Step {step.step}: {step.status}
+                                                        </span>
+                                                        {step.analysis && (
+                                                            <p className="text-text-muted mt-1 leading-relaxed">{step.analysis}</p>
+                                                        )}
+                                                        {step.data && (
+                                                            <pre className="text-text-muted mt-1 overflow-auto max-h-24 text-[10px]">
+                                                                {JSON.stringify(step.data, null, 2).slice(0, 300)}...
+                                                            </pre>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>

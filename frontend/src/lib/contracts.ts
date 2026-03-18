@@ -13,7 +13,7 @@ import { STACKS_TESTNET } from "@stacks/network";
 
 const CONTRACT_ADDRESS = "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37";
 const AGENT_WALLET = "agent-wallet-v7";
-const SERVICE_REGISTRY = "service-registry-v4";
+const SERVICE_REGISTRY = "service-registry-v5";
 
 const network = STACKS_TESTNET;
 
@@ -363,11 +363,13 @@ export function registerService(
   description: string,
   url: string,
   pricePerCall: number,
+  paymentAddress: string,  // ✅ new param
   onFinish?: (data: any) => void
 ) {
   if (!name || name.trim() === '') throw new Error('Service name is required');
   if (!url || url.trim() === '') throw new Error('Service URL is required');
   if (pricePerCall <= 0) throw new Error('Price per call must be greater than 0');
+  if (!paymentAddress || paymentAddress.trim() === '') throw new Error('Payment address is required');
   return contractCall(
     SERVICE_REGISTRY,
     "register-service",
@@ -376,6 +378,7 @@ export function registerService(
       stringAsciiCV(description),
       stringAsciiCV(url),
       uintCV(pricePerCall),
+      standardPrincipalCV(paymentAddress),  
     ],
     onFinish
   );

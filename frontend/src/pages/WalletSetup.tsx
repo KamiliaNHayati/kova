@@ -31,12 +31,11 @@ import {
   Copy,
   Key,
   Zap,
-  Eye,
-  EyeOff,
   Bot,
   ChevronDown,
   Shield,
   ShieldCheck,
+  Cpu
 } from "lucide-react";
 
 // Validation helpers
@@ -90,7 +89,6 @@ export default function WalletSetup() {
 
   // Copy states
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [showKeyFor, setShowKeyFor] = useState<string | null>(null);
 
   // Operator state
   const [operatorRegistered, setOperatorRegistered] = useState(false);
@@ -100,14 +98,12 @@ export default function WalletSetup() {
   const [txStatus, setTxStatus] = useState("");
   const [txError, setTxError] = useState("");
 
-  // Effect 1 — runs on address change
   useEffect(() => {
     if (!address) return;
     setSavedAgents(getSavedAgents(address));
     fetchOperatorStatus();
   }, [address]);
 
-  // Effect 2 — runs when agent selection changes
   useEffect(() => {
     if (!address) return;
     checkWallet();
@@ -138,7 +134,6 @@ export default function WalletSetup() {
     };
   }, [address, savedAgents]);
 
-  // Auto-generate first agent on mount if no local agents exist
   useEffect(() => {
     if (!loading && savedAgents.length === 0 && !generatedAgent) {
       createAgentFromBackend("Agent 1")
@@ -149,7 +144,6 @@ export default function WalletSetup() {
 
   async function checkWallet() {
     try {
-      // v3: check if any agent has a wallet
       const agents = getSavedAgents(address!);
       if (agents.length === 0) {
         setHasWallet(false);
@@ -157,7 +151,6 @@ export default function WalletSetup() {
         setLoading(false);
         return;
       }
-      // Check the first (or selected) agent's wallet
       const agentAddr = agents[selectedAgentIdx]?.address || agents[0].address;
       const result = await getWallet(address!, agentAddr);
       if (result && result.value !== null && result.value !== undefined) {
@@ -179,7 +172,6 @@ export default function WalletSetup() {
   async function fetchOperatorStatus() {
     if (!address) return;
     try {
-      // Check on-chain operator registration
       const opResult = await getOperator(address);
       if (opResult && opResult.value) {
         setOperatorRegistered(true);
@@ -193,7 +185,6 @@ export default function WalletSetup() {
     }
 
     try {
-      // Get backend operator address
       const resp = await fetch("http://localhost:4000/api/operator-info");
       const info = await resp.json();
       setBackendOperator(info.operatorAddress || null);
@@ -259,7 +250,6 @@ export default function WalletSetup() {
     const amt = Math.floor(parseFloat(withdrawAmt) * 1_000_000);
     if (amt > escrowBalance) { setWithdrawError("Exceeds escrow balance"); return; }
     
-    // UI Lock Check
     const agentState = agentStatuses[agentAddr];
     if (agentState && agentState.running) {
         alert("⚠️ WARNING: This agent is actively paying for a service right now.\n\nWithdrawing your balance mid-flight may cause the transaction to fail and your data won't arrive. Please wait a few seconds before withdrawing.");
@@ -267,13 +257,14 @@ export default function WalletSetup() {
     }
 
     setTxStatus("Confirm withdrawal in your wallet...");
-    // v3: withdraw(agent, amount)
     withdraw(agentAddr, amt, (data) => {
       if (data && data.error) { setTxError(`Withdraw failed: ${data.error}`); setTxStatus(""); }
       else { 
         setTxStatus("Withdrawn!"); setWithdrawAmt(""); 
         pushAudit("WITHDRAW", { agentAddr, amount: amt });
         setTimeout(() => checkWallet(), 3000); 
+        setTimeout(() => checkWallet(), 8000);
+        setTimeout(() => checkWallet(), 15000);
       }
     });
   }
@@ -304,17 +295,12 @@ export default function WalletSetup() {
         setTxError(`Transaction failed: ${data.error}`);
         setTxStatus("");
       } else {
-        // Save agent keypair to localStorage if it's new
         if (generatedAgent) {
           saveAgent(address!, generatedAgent);
           setSavedAgents(getSavedAgents(address!));
         }
 
-        // Tell backend to switch to this agent's index
-        // DELETE this block from handleCreate
-
         pushAudit("CREATE_WALLET", { agentAddr: targetAgent.address, dailyLimit: daily, perCallLimit: perCall });
-        
         setTxStatus("Wallet creation submitted! Waiting for testnet confirmation... This may take several minutes.");
         setGeneratedAgent(null);
         setTimeout(() => checkWallet(), 5000);
@@ -337,7 +323,6 @@ export default function WalletSetup() {
     if (perCall > daily) { setNewPerCallError("Per-call limit cannot exceed daily limit"); return; }
 
     setTxStatus("Confirm in your wallet...");
-    // v3: setLimits(agent, daily, perCall)
     const agentAddr = savedAgents[selectedAgentIdx]?.address;
     if (!agentAddr) { setTxError("No agent selected"); return; }
     setLimits(agentAddr, daily, perCall, (data) => {
@@ -362,14 +347,10 @@ export default function WalletSetup() {
 
     setTxStatus("Generating agent from backend...");
     try {
-      // Instead of calculating nextIdx locally, ask backend
-      const activeResp = await fetch("http://localhost:4000/api/active-agent");
-      const activeData = await activeResp.json();
-      // backend tracks nextAgentIndex correctly
-      const agent = await createAgentFromBackend(`Agent ${savedAgents.length + 1}`, undefined); // let backend decide
+      await fetch("http://localhost:4000/api/active-agent");
+      const agent = await createAgentFromBackend(`Agent ${savedAgents.length + 1}`, undefined);
 
       setTxStatus("Confirm in your wallet...");
-      // v3: createWallet creates an isolated wallet per agent
       createWallet(agent.address, Math.floor(10 * 1_000_000), Math.floor(1 * 1_000_000), (data) => {
         if (data && data.error) {
           setTxError(`Add agent failed: ${data.error}`);
@@ -405,71 +386,87 @@ export default function WalletSetup() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-white">
+        <div className="relative w-12 h-12 flex items-center justify-center mb-4">
+          <div className="absolute inset-0 border-2 border-white/10 rounded-full" />
+          <div className="absolute inset-0 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+          <Cpu className="w-4 h-4 text-cyan-400" />
+        </div>
+        <p className="text-xs font-mono uppercase tracking-widest text-cyan-400 drop-shadow-[0_0_5px_rgba(34,211,238,0.5)]">Checking On-Chain State</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto pt-4 relative">
-      {/* Header */}
+    <div className="max-w-5xl mx-auto relative z-10 animate-fade-in pb-20">
+      
+      {/* ─── Header ────────────────────────────────────────────── */}
       <div className="mb-10">
-        <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Wallet Setup</h1>
-        <p className="text-text-muted">
+        <h1 className="text-3xl md:text-4xl font-medium tracking-tight text-white mb-2">Wallet Configuration</h1>
+        <p className="text-white/50 font-light">
           {hasWallet
-            ? "Manage your escrow balance, spending limits, and authorized agents."
-            : "Create your agent wallet to enable autonomous escrow payments."}
+            ? "Manage your escrow balance, spending limits, and authorized operational agents."
+            : "Deploy your agent's smart contract wallet to enable autonomous escrow payments."}
         </p>
       </div>
 
+      {/* ─── Status Banners ────────────────────────────────────── */}
       {txStatus && (
-        <div className="p-3 mb-6 rounded-lg bg-accent/10 text-accent text-sm">
-          {txStatus}
+        <div className="flex items-center gap-3 p-4 mb-6 rounded-2xl bg-cyan-500/[0.05] border border-cyan-400/20 backdrop-blur-md">
+          {txStatus.includes("Confirm") || txStatus.includes("Waiting") ? (
+            <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-cyan-400" />
+          )}
+          <span className="text-sm text-cyan-400 font-light drop-shadow-[0_0_5px_rgba(34,211,238,0.3)]">{txStatus}</span>
         </div>
       )}
 
       {txError && (
-        <div className="p-3 mb-6 rounded-lg bg-danger/10 text-danger text-sm">
-          {txError}
+        <div className="flex items-center gap-3 p-4 mb-6 rounded-2xl bg-red-500/[0.05] border border-red-500/20 backdrop-blur-md">
+          <AlertTriangle className="w-4 h-4 text-red-400" />
+          <span className="text-sm text-red-400 font-light">{txError}</span>
         </div>
       )}
 
+      {/* ─── Create Wallet View ────────────────────────────────── */}
       {!hasWallet ? (
-        <div className="max-w-2xl">
-          <Card title="Create Agent Wallet" icon={<Plus className="w-5 h-5" />}>
-            <div className="space-y-5">
-              {/* Auto-generated agent */}
-              <div className="p-4 rounded-xl bg-surface border border-border/50">
-                <div className="flex items-center gap-2 mb-3">
-                  <Zap className="w-4 h-4 text-warning" />
-                  <span className="text-sm font-medium text-warning">
-                    {savedAgents.length > 0 ? "Pending Agent Wallet" : "Agent Auto-Generated"}
+        <div className="max-w-2xl mx-auto mt-10">
+          <Card title="Initialize Agent Escrow" icon={<Plus className="w-5 h-5" />}>
+            <div className="space-y-6">
+              
+              {/* Auto-generated agent info */}
+              <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.05]">
+                <div className="flex items-center gap-2 mb-4">
+                  <Zap className="w-4 h-4 text-cyan-400" />
+                  <span className="text-sm font-medium text-white/90">
+                    {savedAgents.length > 0 ? "Pending Agent Wallet" : "Identity Auto-Generated"}
                   </span>
                 </div>
+                
                 {(generatedAgent || savedAgents[selectedAgentIdx]) && (
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     <div>
-                      <label className="block text-[10px] text-text-muted uppercase mb-1">Agent Address</label>
+                      <label className="block text-[10px] font-mono text-white/40 uppercase tracking-widest mb-2">Agent Public Address</label>
                       <div
                         onClick={() => copyToClipboard((generatedAgent || savedAgents[selectedAgentIdx]).address, "create-addr")}
-                        className="flex items-center justify-between px-3 py-2.5 bg-black/30 border border-border/40 rounded-lg cursor-pointer hover:border-success/40 transition-all group"
+                        className="flex items-center justify-between px-4 py-3 bg-[#0A0A0A] border border-white/10 rounded-xl cursor-pointer hover:border-cyan-400/30 hover:bg-cyan-500/[0.02] transition-all group"
                       >
-                        <span className="font-mono text-xs text-white truncate flex-1">{(generatedAgent || savedAgents[selectedAgentIdx]).address}</span>
+                        <span className="font-mono text-xs text-white/80 truncate flex-1">{(generatedAgent || savedAgents[selectedAgentIdx]).address}</span>
                         {copiedField === "create-addr" ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-success ml-2 flex-shrink-0" />
+                          <CheckCircle2 className="w-4 h-4 text-cyan-400 ml-2 flex-shrink-0" />
                         ) : (
-                          <Copy className="w-3.5 h-3.5 text-text-muted group-hover:text-success ml-2 flex-shrink-0 transition-colors" />
+                          <Copy className="w-4 h-4 text-white/30 group-hover:text-cyan-400 ml-2 flex-shrink-0 transition-colors" />
                         )}
                       </div>
                     </div>
-                    <p className="text-[10px] text-text-muted mt-2 flex items-center gap-1">
-                      <Key className="w-3 h-3 text-warning" /> Keys securely managed by Kova Backend via KMS.
+                    <p className="text-[10px] font-mono text-white/40 flex items-center gap-2">
+                      <Key className="w-3 h-3 text-cyan-400" /> Keys are securely managed by Kova Backend via KMS.
                     </p>
                     {savedAgents.length > 0 && (
-                      <div className="p-2.5 rounded-lg bg-warning/10 border border-warning/20">
-                        <p className="text-xs text-warning/90 leading-relaxed">
-                          ⚠️ This agent identity exists locally, but the on-chain wallet hasn't been confirmed yet. If you already submitted a transaction to create it, please wait for testnet confirmation. Otherwise, submit creation now.
+                      <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 mt-4">
+                        <p className="text-xs text-amber-400/90 font-light leading-relaxed">
+                          ⚠️ This identity exists locally, but the on-chain wallet hasn't been confirmed. Wait for testnet confirmation if submitted, otherwise submit now.
                         </p>
                       </div>
                     )}
@@ -498,46 +495,50 @@ export default function WalletSetup() {
               </div>
               <button
                 onClick={handleCreate}
-                className="w-full mt-2 px-4 py-3.5 bg-accent hover:bg-accent-hover text-white font-semibold rounded-xl transition-all hover:shadow-[0_0_20px_rgba(99,102,241,0.3)] hover:scale-[1.01]"
+                className="w-full mt-2 px-6 py-4 bg-cyan-400 hover:bg-cyan-300 text-black font-semibold rounded-xl transition-all shadow-[0_0_15px_rgba(34,211,238,0.3)] hover:shadow-[0_0_25px_rgba(34,211,238,0.5)] hover:scale-[1.02]"
               >
-                Create Wallet
+                Deploy Smart Escrow
               </button>
             </div>
           </Card>
         </div>
       ) : (
+        /* ─── Main Management View ──────────────────────────────── */
         <div className="space-y-6">
-          {/* Agent Selector */}
+          
+          {/* Agent Selector (Dropdown) */}
           {savedAgents.length > 0 && (
-            <div className="max-w-sm relative">
-              <label className="block text-xs text-text-muted mb-1.5 uppercase">Active Agent</label>
+            <div className="max-w-sm relative z-40">
+              <label className="block text-[10px] font-mono text-cyan-400/80 mb-2 uppercase tracking-widest">Active Node Setup</label>
               <button
                 onClick={() => setAgentDropdownOpen(!agentDropdownOpen)}
-                className="w-full flex items-center justify-between px-4 py-3 bg-surface border border-border rounded-xl hover:border-accent/40 transition-all"
+                className="w-full flex items-center justify-between px-4 py-3 bg-white/[0.02] border border-white/[0.08] rounded-2xl hover:bg-white/[0.04] transition-all shadow-lg"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-warning/10 flex items-center justify-center">
-                    <Bot className="w-4 h-4 text-warning" />
+                  <div className="w-8 h-8 rounded-xl bg-cyan-500/[0.05] border border-cyan-400/20 flex items-center justify-center shadow-inner">
+                    <Bot className="w-4 h-4 text-cyan-400" />
                   </div>
                   <div className="text-left">
-                    <p className="text-sm font-medium text-white">{savedAgents[selectedAgentIdx]?.label || "Agent"}</p>
-                    <p className="text-[10px] font-mono text-text-muted truncate max-w-[220px]">{savedAgents[selectedAgentIdx]?.address || "—"}</p>
+                    <p className="text-sm font-medium text-white/90">{savedAgents[selectedAgentIdx]?.label || "Agent"}</p>
+                    <p className="text-[10px] font-mono text-cyan-400/60 truncate max-w-[200px]">{savedAgents[selectedAgentIdx]?.address || "—"}</p>
                   </div>
                 </div>
-                <ChevronDown className={`w-4 h-4 text-text-muted transition-transform ${agentDropdownOpen ? "rotate-180" : ""}`} />
+                <ChevronDown className={`w-4 h-4 text-white/40 transition-transform duration-300 ${agentDropdownOpen ? "rotate-180" : ""}`} />
               </button>
+              
               {agentDropdownOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-xl overflow-hidden shadow-xl z-50">
+                <div className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-white/10 rounded-2xl overflow-hidden shadow-2xl z-50 py-1">
                   {savedAgents.map((agent, idx) => (
                     <button
                       key={agent.address}
                       onClick={() => { setSelectedAgentIdx(idx); setAgentDropdownOpen(false); }}
-                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-accent/5 transition-colors text-left ${idx === selectedAgentIdx ? "bg-accent/10 border-l-2 border-accent" : ""}`}
+                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors text-left ${idx === selectedAgentIdx ? "bg-white/[0.02] relative" : ""}`}
                     >
-                      <Bot className="w-4 h-4 text-warning flex-shrink-0" />
+                      {idx === selectedAgentIdx && <div className="absolute left-0 top-0 bottom-0 w-1 bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]" />}
+                      <Bot className={`w-4 h-4 flex-shrink-0 ${idx === selectedAgentIdx ? "text-cyan-400" : "text-white/40"}`} />
                       <div>
-                        <p className="text-sm font-medium text-white">{agent.label}</p>
-                        <p className="text-[10px] font-mono text-text-muted truncate max-w-[220px]">{agent.address}</p>
+                        <p className={`text-sm font-medium ${idx === selectedAgentIdx ? "text-white" : "text-white/70"}`}>{agent.label}</p>
+                        <p className="text-[10px] font-mono text-white/40 truncate max-w-[220px]">{agent.address}</p>
                       </div>
                     </button>
                   ))}
@@ -551,29 +552,29 @@ export default function WalletSetup() {
 
             {/* Escrow Balance */}
             <Card
-              title="Escrow Balance"
-              icon={<Wallet className="w-5 h-5 text-success" />}
-              className="border-success/20 ring-1 ring-success/10"
+              title="Escrow Protocol"
+              icon={<Wallet className="w-5 h-5 text-emerald-400" />}
+              className="border-emerald-500/20"
             >
-              <div className="flex items-start gap-3 p-4 rounded-xl bg-success/5 border border-success/10 mb-4">
-                <Info className="w-5 h-5 text-success flex-shrink-0 mt-0.5" />
-                <div className="text-sm text-text-muted leading-relaxed">
-                  <p className="text-success font-medium mb-1">Escrow (Autonomous x402)</p>
+              <div className="flex items-start gap-3 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 mb-6">
+                <Info className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <div className="text-sm font-light text-emerald-100 leading-relaxed">
+                  <p className="font-medium text-emerald-400 mb-1 tracking-tight">Autonomous X402</p>
                   <p>Deposit once — agents pay services automatically. Contract enforces your rules.</p>
                 </div>
               </div>
 
-              <div className="text-center p-4 mb-4 rounded-xl bg-black/20 border border-border/30">
-                <p className="text-xs text-text-muted uppercase mb-1">Escrow Balance</p>
-                <p className="text-3xl font-bold text-white">
-                  {(escrowBalance / 1_000_000).toFixed(2)} <span className="text-sm text-text-muted">STX</span>
+              <div className="text-center p-6 mb-6 rounded-2xl bg-[#0A0A0A] border border-white/[0.05] shadow-inner">
+                <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-2">Escrow Balance</p>
+                <p className="text-4xl font-medium text-white tracking-tight">
+                  {(escrowBalance / 1_000_000).toFixed(2)} <span className="text-lg text-white/30 font-light">STX</span>
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <InputField
-                    label="Deposit (STX)"
+                    label="Deposit Amount"
                     placeholder="5.0"
                     value={depositAmt}
                     onChange={setDepositAmt}
@@ -582,14 +583,14 @@ export default function WalletSetup() {
                   />
                   <button
                     onClick={handleDeposit}
-                    className="w-full mt-2 px-4 py-2.5 bg-success/10 border border-success/20 text-success hover:bg-success hover:text-black rounded-lg font-medium transition-all flex items-center justify-center gap-2"
+                    className="w-full mt-2 px-4 py-3 bg-cyan-500/[0.05] border border-cyan-400/20 text-cyan-400 hover:bg-cyan-400 hover:text-black rounded-xl font-medium transition-all flex items-center justify-center gap-2"
                   >
                     <ArrowDownCircle className="w-4 h-4" /> Deposit
                   </button>
                 </div>
                 <div>
                   <InputField
-                    label="Withdraw (STX)"
+                    label="Withdraw Amount"
                     placeholder="1.0"
                     value={withdrawAmt}
                     onChange={setWithdrawAmt}
@@ -598,7 +599,7 @@ export default function WalletSetup() {
                   />
                   <button
                     onClick={handleWithdraw}
-                    className="w-full mt-2 px-4 py-2.5 bg-white/5 border border-border/30 text-text-muted hover:bg-white/10 rounded-lg font-medium transition-all flex items-center justify-center gap-2"
+                    className="w-full mt-2 px-4 py-3 bg-white/[0.03] border border-white/10 text-white/80 hover:bg-white/[0.08] hover:text-white rounded-xl font-medium transition-all flex items-center justify-center gap-2"
                   >
                     <ArrowUpCircle className="w-4 h-4" /> Withdraw
                   </button>
@@ -608,11 +609,14 @@ export default function WalletSetup() {
 
             {/* Spending Limits */}
             <Card
-              title="Spending Limits"
-              icon={<Settings className="w-5 h-5 text-accent" />}
+              title="Constraint Matrix"
+              icon={<Settings className="w-5 h-5" />}
             >
-              <p className="text-sm text-text-muted mb-4">Hard caps enforced by the smart contract. Shared across all agents.</p>
-              <div className="grid grid-cols-2 gap-4">
+              <p className="text-sm font-light text-white/50 mb-6 leading-relaxed">
+                Hard caps enforced directly by the Clarity smart contract. Shared safely across your operational node.
+              </p>
+              
+              <div className="grid grid-cols-2 gap-4 mb-4">
                 <InputField
                   label="Daily Limit (STX)"
                   placeholder="20.0"
@@ -632,178 +636,180 @@ export default function WalletSetup() {
               </div>
               <button
                 onClick={handleSetLimits}
-                className="w-full mt-4 px-4 py-3 bg-accent/20 border border-accent/30 text-accent hover:bg-accent hover:text-white font-semibold rounded-xl transition-all"
+                className="w-full mt-2 px-4 py-3 bg-white/[0.03] border border-white/10 text-white/80 hover:bg-white text-sm hover:text-black font-semibold rounded-xl transition-all shadow-sm hover:shadow-[0_0_15px_rgba(255,255,255,0.4)]"
               >
-                Save Limits
+                Update Constraints
               </button>
             </Card>
           </div>
 
-          {/* Manage Agents */}
-          <Card
-            title="Manage Agents"
-            icon={<Users className="w-5 h-5 text-warning" />}
-            className="hover:border-warning/30 transition-colors"
-          >
-            <p className="text-sm text-text-muted mb-4">
-              Agents are logical identities. Kova executes payments on your behalf via registered operator — private keys are not required for agents. Authorize up to 5 agents.
-            </p>
+          {/* Manage Agents & Operator Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* Manage Agents */}
+            <Card
+              title="Identity Fleet"
+              icon={<Users className="w-5 h-5 text-cyan-400" />}
+              className="hover:border-cyan-400/20 transition-colors"
+            >
+              <p className="text-sm font-light text-white/50 mb-6 leading-relaxed">
+                Agents are logical identities. Kova executes payments via your registered operator. Private keys are never required.
+              </p>
 
-            {/* Agent list */}
-            {savedAgents.length > 0 ? (
-              <div className="space-y-3 mb-4">
-                {savedAgents.map((agent, i) => (
-                  <div key={agent.address} className="p-4 bg-black/20 rounded-xl border border-border/30">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-lg bg-warning/20 flex items-center justify-center text-xs font-bold text-warning">
-                          {i + 1}
-                        </span>
-                        <span className="text-sm font-medium text-white">{agent.label}</span>
-                        {agentStatuses[agent.address] && (
-                          <div className="flex items-center ml-1" title={agentStatuses[agent.address].lastSeen > Date.now() - 300000 ? "Agent Active (Heartbeat recent)" : "Agent Offline (No recent heartbeat)"}>
-                            <div className={`w-2 h-2 rounded-full ${agentStatuses[agent.address].onChainActive && agentStatuses[agent.address].lastSeen > Date.now() - 300000 ? 'bg-success shadow-[0_0_8px_rgba(34,197,94,0.6)]' : agentStatuses[agent.address].onChainActive ? 'bg-warning shadow-[0_0_8px_rgba(234,179,8,0.6)]' : 'bg-danger shadow-[0_0_8px_rgba(239,68,68,0.6)]'}`} />
-                          </div>
+              {/* Agent list */}
+              {savedAgents.length > 0 ? (
+                <div className="space-y-3 mb-6">
+                  {savedAgents.map((agent, i) => (
+                    <div key={agent.address} className="p-4 bg-[#0A0A0A] rounded-2xl border border-white/[0.05]">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <span className="w-6 h-6 rounded-md bg-cyan-500/[0.1] flex items-center justify-center text-[10px] font-mono text-cyan-400 border border-cyan-400/20">
+                            {String(i + 1).padStart(2, '0')}
+                          </span>
+                          <span className="text-sm font-medium text-white/90 tracking-tight">{agent.label}</span>
+                          {agentStatuses[agent.address] && (
+                            <div className="flex items-center ml-2">
+                              <div className={`w-2 h-2 rounded-full ${agentStatuses[agent.address].onChainActive ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]'}`} />
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleRemoveAgent(agent.address)}
+                          className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/30 hover:text-red-400 transition-colors"
+                          title="Purge Identity"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Address */}
+                      <div
+                        onClick={() => copyToClipboard(agent.address, `addr-${i}`)}
+                        className="flex items-center justify-between px-3 py-2 bg-white/[0.02] border border-white/5 rounded-xl cursor-pointer hover:border-cyan-400/30 hover:bg-cyan-500/[0.02] transition-all group"
+                      >
+                        <span className="font-mono text-[10px] text-white/60 truncate flex-1">{agent.address}</span>
+                        {copiedField === `addr-${i}` ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 ml-2 flex-shrink-0" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5 text-white/20 group-hover:text-cyan-400 ml-2 flex-shrink-0 transition-colors" />
                         )}
                       </div>
-                      <button
-                        onClick={() => handleRemoveAgent(agent.address)}
-                        className="p-1.5 rounded-lg hover:bg-danger/10 text-text-muted hover:text-danger transition-colors"
-                        title="Remove agent"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
                     </div>
-
-                    {/* Address */}
-                    <div
-                      onClick={() => copyToClipboard(agent.address, `addr-${i}`)}
-                      className="flex items-center justify-between px-3 py-2 mb-2 bg-black/20 border border-border/20 rounded-lg cursor-pointer hover:border-success/30 transition-all group"
-                    >
-                      <span className="font-mono text-[11px] text-white/80 truncate flex-1">{agent.address}</span>
-                      {copiedField === `addr-${i}` ? (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-success ml-2 flex-shrink-0" />
-                      ) : (
-                        <Copy className="w-3.5 h-3.5 text-text-muted group-hover:text-success ml-2 flex-shrink-0 transition-colors" />
-                      )}
-                    </div>
-
-
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-text-muted mb-4">
-                Your first agent was created with the wallet. Generate more below.
-              </p>
-            )}
-
-            {/* Generate new agent button */}
-            {savedAgents.length < 5 ? (
-              <button
-                onClick={handleGenerateAgent}
-                className="w-full px-4 py-3 bg-warning/10 border border-warning/20 text-warning hover:bg-warning hover:text-black font-medium rounded-xl transition-all flex items-center justify-center gap-2"
-              >
-                <Zap className="w-4 h-4" />
-                Generate New Agent
-              </button>
-            ) : (
-              <p className="text-xs text-text-muted text-center">Maximum 5 agents reached. Remove one to add another.</p>
-            )}
-
-            {/* Production note */}
-            <div className="mt-4 p-3 rounded-lg bg-warning/5 border border-warning/10 text-[10px] text-text-muted flex items-start gap-2">
-              <Key className="w-3 h-3 text-warning mt-0.5 flex-shrink-0" />
-              <span>
-                <strong className="text-warning">Hackathon:</strong> Keys stored in browser localStorage.{" "}
-                <strong className="text-warning">Production:</strong> use KMS/HSM for secure key management.
-              </span>
-            </div>
-          </Card>
-
-          {/* Operator Setup — one-time registration */}
-          <Card
-            title="Operator Setup"
-            icon={operatorRegistered ? <ShieldCheck className="w-5 h-5 text-success" /> : <Shield className="w-5 h-5 text-accent" />}
-            className={operatorRegistered ? "border-success/20 ring-1 ring-success/10" : "hover:border-accent/30 transition-colors"}
-          >
-            {operatorRegistered ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 p-3 rounded-xl bg-success/10 border border-success/20">
-                  <ShieldCheck className="w-5 h-5 text-success flex-shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium text-success">Operator Active</p>
-                    <p className="text-xs text-text-muted mt-0.5">Your backend can autonomously sign payments.</p>
-                  </div>
+                  ))}
                 </div>
-                {operatorAddress && (
-                  <div>
-                    <label className="block text-[10px] text-text-muted uppercase mb-1">Operator Address</label>
-                    <div
-                      onClick={() => copyToClipboard(operatorAddress, "op-addr")}
-                      className="flex items-center justify-between px-3 py-2.5 bg-black/30 border border-border/40 rounded-lg cursor-pointer hover:border-success/40 transition-all group"
-                    >
-                      <span className="font-mono text-xs text-white truncate flex-1">{operatorAddress}</span>
-                      {copiedField === "op-addr" ? (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-success ml-2 flex-shrink-0" />
-                      ) : (
-                        <Copy className="w-3.5 h-3.5 text-text-muted group-hover:text-success ml-2 flex-shrink-0 transition-colors" />
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-sm text-text-muted leading-relaxed">
-                  Authorize Kova Backend (one-time). Register your backend as the operator. This allows it to sign <code className="text-xs px-1.5 py-0.5 bg-black/30 rounded text-accent">agent-pay</code> and pay gas on behalf of your agents.
+              ) : (
+                <p className="text-xs text-white/40 font-light mb-6">
+                  Your first agent was created with the wallet. Generate more below.
                 </p>
+              )}
 
-                {backendOperator ? (
-                  <div>
-                    <label className="block text-[10px] text-text-muted uppercase mb-1">Backend Operator Address</label>
-                    <div className="px-3 py-2.5 bg-black/30 border border-border/40 rounded-lg">
-                      <span className="font-mono text-xs text-white">{backendOperator}</span>
-                    </div>
-                    <p className="text-[10px] text-text-muted mt-1.5">
-                      This address was auto-detected from your running backend.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="p-3 rounded-xl bg-warning/10 border border-warning/20">
-                    <p className="text-xs text-warning/90">
-                      ⚠️ Backend not reachable. Start <code className="px-1 py-0.5 bg-black/20 rounded">agent.js</code> first, then refresh.
-                    </p>
-                  </div>
-                )}
-
+              {/* Generate new agent button */}
+              {savedAgents.length < 5 ? (
                 <button
-                  onClick={handleRegisterOperator}
-                  disabled={!backendOperator}
-                  className={`w-full px-4 py-3.5 font-semibold rounded-xl transition-all flex items-center justify-center gap-2 ${
-                    backendOperator
-                      ? "bg-accent hover:bg-accent-hover text-white hover:shadow-[0_0_20px_rgba(99,102,241,0.3)] hover:scale-[1.01]"
-                      : "bg-white/5 text-text-muted cursor-not-allowed"
-                  }`}
+                  onClick={handleGenerateAgent}
+                  className="w-full px-4 py-3.5 bg-cyan-500/[0.05] border border-cyan-400/20 text-cyan-400 hover:bg-cyan-400 hover:text-black font-semibold rounded-xl transition-all flex items-center justify-center gap-2 hover:shadow-[0_0_15px_rgba(34,211,238,0.3)]"
                 >
-                  <Shield className="w-4 h-4" />
-                  Register Operator On-Chain
+                  <Zap className="w-4 h-4" />
+                  Generate New Identity
                 </button>
+              ) : (
+                <p className="text-[10px] font-mono uppercase tracking-widest text-white/40 text-center py-3">Capacity limit reached (5/5)</p>
+              )}
 
-                <div className="p-3 rounded-lg bg-accent/5 border border-accent/10 text-[10px] text-text-muted flex items-start gap-2">
-                  <Info className="w-3 h-3 text-accent mt-0.5 flex-shrink-0" />
-                  <span>
-                    One-time setup. After registering, the operator can autonomously settle payments without your approval (unless Telegram guard is enabled).
-                  </span>
-                </div>
+              {/* Production note */}
+              <div className="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-100/70 font-light flex items-start gap-2">
+                <Key className="w-3 h-3 text-amber-400 mt-0.5 flex-shrink-0" />
+                <span className="leading-relaxed">
+                  <strong className="text-amber-400 font-medium">Hackathon:</strong> Keys stored in browser storage.<br/>
+                  <strong className="text-amber-400 font-medium">Production:</strong> Use KMS/HSM integration.
+                </span>
               </div>
-            )}
-          </Card>
+            </Card>
+
+            {/* Operator Setup — one-time registration */}
+            <Card
+              title="Operator Handshake"
+              icon={operatorRegistered ? <ShieldCheck className="w-5 h-5 text-emerald-400" /> : <Shield className="w-5 h-5" />}
+              className={operatorRegistered ? "border-emerald-500/20" : "hover:border-white/10"}
+            >
+              {operatorRegistered ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+                    <ShieldCheck className="w-6 h-6 text-emerald-400 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-emerald-400 tracking-tight mb-0.5">Link Established</p>
+                      <p className="text-xs font-light text-emerald-100/70">Backend authorized to sign payments.</p>
+                    </div>
+                  </div>
+                  {operatorAddress && (
+                    <div>
+                      <label className="block text-[10px] font-mono text-white/40 uppercase tracking-widest mb-2">Operator Public Address</label>
+                      <div
+                        onClick={() => copyToClipboard(operatorAddress, "op-addr")}
+                        className="flex items-center justify-between px-4 py-3 bg-[#0A0A0A] border border-white/10 rounded-xl cursor-pointer hover:border-emerald-400/30 hover:bg-emerald-500/[0.02] transition-all group"
+                      >
+                        <span className="font-mono text-xs text-white/70 truncate flex-1">{operatorAddress}</span>
+                        {copiedField === "op-addr" ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 ml-2 flex-shrink-0" />
+                        ) : (
+                          <Copy className="w-4 h-4 text-white/30 group-hover:text-emerald-400 ml-2 flex-shrink-0 transition-colors" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <p className="text-sm font-light text-white/50 leading-relaxed">
+                    Authorize the Kova Backend. Registering your backend as the operator allows it to sign <code className="font-mono text-xs text-white bg-white/10 px-1 py-0.5 rounded">agent-pay</code> and pay gas fees.
+                  </p>
+
+                  {backendOperator ? (
+                    <div>
+                      <label className="block text-[10px] font-mono text-white/40 uppercase tracking-widest mb-2">Detected Backend Node</label>
+                      <div className="px-4 py-3 bg-[#0A0A0A] border border-white/10 rounded-xl">
+                        <span className="font-mono text-xs text-white/80">{backendOperator}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex gap-3">
+                      <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
+                      <p className="text-sm text-red-200 font-light">
+                        Node unreachable. Initialize <code className="font-mono text-xs bg-red-500/20 px-1 py-0.5 rounded text-red-300">agent.js</code> and refresh the protocol connection.
+                      </p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleRegisterOperator}
+                    disabled={!backendOperator}
+                    className={`w-full px-4 py-3.5 font-semibold text-sm rounded-xl transition-all flex items-center justify-center gap-2 ${
+                      backendOperator
+                        ? "bg-white text-black hover:scale-[1.02] shadow-[0_0_15px_rgba(255,255,255,0.2)]"
+                        : "bg-white/[0.02] border border-white/[0.05] text-white/30 cursor-not-allowed"
+                    }`}
+                  >
+                    <Shield className="w-4 h-4" />
+                    Register On-Chain
+                  </button>
+
+                  <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.05] text-xs font-light text-white/40 flex items-start gap-3">
+                    <Info className="w-4 h-4 text-white/60 shrink-0" />
+                    <span className="leading-relaxed">
+                      One-time cryptographic handshake. Post-registration, the operator settles payments autonomously unless overridden.
+                    </span>
+                  </div>
+                </div>
+              )}
+            </Card>
+          </div>
         </div>
       )}
     </div>
   );
 }
+
+// ─── REUSABLE COMPONENTS ───────────────────────────────────
 
 function Card({
   title,
@@ -817,10 +823,10 @@ function Card({
   className?: string;
 }) {
   return (
-    <div className={`p-6 rounded-2xl bg-surface/80 border border-border shadow-md backdrop-blur-xl ${className}`}>
-      <div className="flex items-center gap-3 mb-6 bg-surface-2/50 w-fit px-4 py-2 rounded-lg border border-border/50">
-        <span>{icon}</span>
-        <h3 className="font-semibold text-white tracking-tight">{title}</h3>
+    <div className={`p-6 md:p-8 rounded-3xl bg-white/[0.02] border border-white/[0.05] shadow-2xl backdrop-blur-xl ${className}`}>
+      <div className="flex items-center gap-3 mb-8 bg-white/[0.03] w-fit px-4 py-2.5 rounded-xl border border-white/[0.05]">
+        <span className="text-white/80">{icon}</span>
+        <h3 className="font-medium text-white tracking-tight">{title}</h3>
       </div>
       {children}
     </div>
@@ -833,7 +839,6 @@ function InputField({
   value,
   onChange,
   type = "text",
-  mono = false,
   error,
 }: {
   label: string;
@@ -841,24 +846,24 @@ function InputField({
   value: string;
   onChange: (v: string) => void;
   type?: string;
-  mono?: boolean;
   error?: string;
 }) {
   return (
     <div className="mb-3">
-      <label className="block text-xs text-text-muted mb-1.5">{label}</label>
+      <label className="block text-[10px] font-mono text-white/40 uppercase tracking-widest mb-2">{label}</label>
       <input
         type={type}
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`w-full px-4 py-3 bg-[#00000040] border rounded-xl text-sm text-white placeholder:text-text-muted/40 focus:outline-none transition-all shadow-inner focus:shadow-[0_0_15px_rgba(99,102,241,0.15)] focus:bg-surface/90 ${error
-          ? "border-danger/50 focus:border-danger ring-1 ring-danger/20"
-          : "border-border/60 focus:border-accent ring-1 ring-transparent focus:ring-accent/20"
-          } ${mono ? "font-mono text-xs tracking-wider" : ""}`}
+        className={`w-full px-4 py-3 bg-[#0A0A0A] border rounded-xl text-sm text-white placeholder:text-white/20 focus:outline-none transition-all shadow-inner focus:shadow-[0_0_10px_rgba(34,211,238,0.1)] ${
+          error
+            ? "border-red-500/50 focus:border-red-400 bg-red-500/5"
+            : "border-white/10 focus:border-cyan-400 focus:bg-white/[0.02]"
+        }`}
       />
       {error && (
-        <p className="mt-1.5 text-xs text-danger">{error}</p>
+        <p className="mt-2 text-xs font-light text-red-400">{error}</p>
       )}
     </div>
   );

@@ -67,6 +67,12 @@ let appState = {
     }
 };
 
+// ─── Agent Key Manager (custodial) ──────────────────
+// Tracks derived agents from the mnemonic.
+// Production: replace with KMS API.
+const derivedAgents = [];
+let nextAgentIndex = 0;
+
 function saveState() {
     fs.writeFileSync(STATE_FILE, JSON.stringify({
         ...appState,
@@ -442,6 +448,7 @@ async function runService(endpoint) {
     console.log(`💳 Step 3: Executing agent-pay from escrow...\n`);
     console.log(`   Agent signs contract-call → escrow transfers STX → service receives payment\n`);
     const txId = await agentPay(serviceAddress, price, currentOwner, currentAgent);
+
     if (!txId) {
         console.log(`   ❌ agent-pay failed — check balance or limits`);
         notify(`❌ Payment *failed* for \`${endpoint}\`\nAgent: \`${currentAgent.slice(0,8)}...\`\nReason: agent-pay failed`);
@@ -834,7 +841,7 @@ function startApiServer() {
             }
             allRecords.sort((a,b) => b.block - a.block || b.nonce - a.nonce);
             const slicedRecords = allRecords.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
-            res.json({ totalCount, records: slicedRecords });
+            res.json({ totalCount: allRecords.length, records: slicedRecords }); // use allRecords.length not totalCount
         } catch (err) {
             res.status(500).json({ error: err.message });
         }
@@ -946,6 +953,37 @@ function startApiServer() {
         }
     });
 
+    apiServer.post("/api/run-pipeline", async (req, res) => {
+        const { pipeline } = req.body;
+        if (!pipeline) return res.status(400).json({ error: "pipeline missing" });
+
+        if (pipeline.owner) OWNER = pipeline.owner;
+        console.log(`\n🔗 Running pipeline from UI: ${pipeline.name}`);
+        
+        res.json({ success: true }); // respond immediately
+        
+        // Run and store results
+        try {
+            const results = await runPipeline(pipeline);
+            latestResults = {
+                timestamp: new Date().toISOString(),
+                services: {},
+                pipeline: results,
+                runs: latestResults.runs + 1,
+                agent: agentAddress,
+                owner: OWNER,
+            };
+        } catch (e) {
+            console.error("Pipeline error:", e);
+        }
+
+        if (pipeline.scheduleInterval) {
+            const ms = pipeline.scheduleInterval * 60 * 1000;
+            setInterval(() => runPipeline(pipeline), ms);
+            console.log(`⏱️ Pipeline scheduled every ${pipeline.scheduleInterval} minutes`);
+        }
+    });
+
     apiServer.listen(AGENT_API_PORT, () => {
         console.log(`  🌐 Agent API running → http://localhost:${AGENT_API_PORT}/api/latest`);
         console.log(`  🔄 Settle endpoint → POST http://localhost:${AGENT_API_PORT}/api/settle-escrow`);
@@ -953,12 +991,6 @@ function startApiServer() {
         console.log(`  💡 Any app can fetch latest results from this URL\n`);
     });
 }
-
-// ─── Agent Key Manager (custodial) ──────────────────
-// Tracks derived agents from the mnemonic.
-// Production: replace with KMS API.
-const derivedAgents = [];
-let nextAgentIndex = 0;
 
 async function deriveAgentAtIndex(index) {
     const mnemonic = process.env.AGENT_MNEMONIC;
@@ -985,6 +1017,11 @@ function applySchedule(heartbeatSecret = "kova-demo-secret") {
     if (currentIntervalId) {
         clearInterval(currentIntervalId);
         currentIntervalId = null;
+    }
+
+    if (SCHEDULE_MODE === "idle") {
+        console.log(`⏸️  Agent idle — waiting for UI configuration.\n`);
+        return; // ✅ don't run anything
     }
 
     console.log(`\n📋 Schedule mode: ${SCHEDULE_MODE}`);
@@ -1048,15 +1085,19 @@ async function main() {
             } catch (err) {
                 console.error(`❌ Webhook failed: ${err.message}`);
             }
-        }
+        } 
 
         if (isBotActive()) {
             console.log("📱 Agent is running. Press Ctrl+C to stop.\n");
         } else {
             process.exit(0);
         }
-
-    } else {
+    
+    } else if (SCHEDULE_MODE === "idle") {
+        console.log("⏸️  Agent idle — waiting for UI. Press Ctrl+C to stop.\n");
+        // just keep running for API server
+    } 
+    else {
         console.error(`❌ Unknown SCHEDULE_MODE: ${SCHEDULE_MODE}`);
         console.error(`   Valid modes: once, interval, pipeline`);
         process.exit(1);
@@ -1119,7 +1160,7 @@ async function runPipeline(pipeline) {
             }
 
             // Execute agent-pay from escrow
-            const txId = await agentPay(serviceAddr, price);
+            const txId = await agentPay(serviceAddr, price, currentOwner, currentAgent);
             if (!txId) {
                 console.log(`   ❌ agent-pay failed for ${step.service}`);
                 results.steps.push({ step: stepNum, type: step.type, status: "failed", reason: "agent-pay failed" });
@@ -1128,7 +1169,16 @@ async function runPipeline(pipeline) {
 
             // Fetch data from service
             try {
-                const response = await axios.get(step.url);
+                const paymentProof = JSON.stringify({
+                    transaction: txId,
+                    payer: operatorAddress,
+                    network: "stacks:2147483648",
+                    scheme: "escrow",
+                });
+                const response = await axios.get(step.url, {
+                    headers: { "X-PAYMENT": paymentProof },
+                    timeout: 10000
+                });
                 const data = response.data;
 
                 console.log(`   ✅ Data received from ${step.service}`);
@@ -1152,7 +1202,8 @@ async function runPipeline(pipeline) {
             try {
                 const analysis = await callLLM({
                     apiKey,
-                    model: step.llmModel || "google/gemini-2.0-flash-exp:free",
+                    // In agent.js callLLM default
+                    model: step.llmModel || "mistralai/mistral-small-3.1-24b-instruct:free",
                     prompt: step.llmPrompt || "Analyze the data.",
                     context: stepResults,
                 });
@@ -1192,29 +1243,42 @@ async function callLLM({ apiKey, model, prompt, context }) {
         .map(([id, data]) => `[${id}]: ${JSON.stringify(data, null, 2)}`)
         .join("\n\n");
 
-    const response = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
-        model,
-        messages: [
-            {
-                role: "system",
-                content: "You are a data analysis agent for Kova. Analyze the provided data from multiple services and give a clear, actionable recommendation. Be concise — max 3 sentences.",
-            },
-            {
-                role: "user",
-                content: `${prompt}\n\n--- Data from previous steps ---\n${contextStr}`,
-            },
-        ],
-        max_tokens: 300,
-    }, {
-        headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://kova.app",
-            "X-Title": "Kova Agent",
-        },
-    });
+    let lastErr;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const response = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
+                model,
+                messages: [
+                    { role: "system", content: "You are a data analysis agent for Kova. Analyze the provided data from multiple services and give a clear, actionable recommendation. Be concise — max 3 sentences." },
+                    { role: "user", content: `${prompt}\n\n--- Data from previous steps ---\n${contextStr}` },
+                ],
+                max_tokens: 300,
+            }, {
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://kova.app",
+                    "X-Title": "Kova Agent",
+                },
+            });
+            return response.data.choices?.[0]?.message?.content || "No analysis generated.";
+        } catch (err) {
+            if (err.response?.status === 429) {
+                console.log(`   ⏳ Rate limited — waiting ${10 * (attempt + 1)}s...`);
+                await new Promise(r => setTimeout(r, 10000 * (attempt + 1)));
+                lastErr = err;
+            } else {
+                throw err;
+            }
+        }
+    }
 
-    return response.data.choices?.[0]?.message?.content || "No analysis generated.";
+    // All retries exhausted — return contextual mock for demo
+    console.log(`   ⚠️ OpenRouter rate limited — using demo analysis`);
+    const prices = Object.entries(context).flatMap(([_, data]) => 
+        data.prices ? Object.entries(data.prices).map(([coin, p]) => `${coin}: $${Number(p.usd).toFixed(0)}`) : []
+    ).join(", ");
+    return `**Demo Analysis** — Based on current market data (${prices || "fetched via x402"}): Markets show mixed signals with moderate volatility. BTC remains range-bound while STX shows relative strength. **Recommendation: HOLD** — await clearer momentum before new positions.`;
 }
 
 // ─── Condition Evaluator ────────────────────────────

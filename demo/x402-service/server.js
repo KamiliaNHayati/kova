@@ -196,7 +196,36 @@ app.post("/api/register-service", (req, res) => {
 
 // List all services
 app.get("/api/services", (req, res) => {
-    res.json({ services: dynamicServices });
+    const staticServices = [
+        {
+            name: "price-feed",
+            description: "Real-time crypto price data (BTC, ETH, STX)",
+            url: "http://localhost:3402/api/price-feed",
+            priceSTX: "0.500000",
+            price: Number(STXtoMicroSTX(0.5)),
+            address: PRICE_FEED_ADDRESS,
+            active: true,
+        },
+        {
+            name: "summarize",
+            description: "AI-powered text summarization",
+            url: "http://localhost:3402/api/summarize",
+            priceSTX: "1.000000",
+            price: Number(STXtoMicroSTX(1.0)),
+            address: SUMMARIZER_ADDRESS,
+            active: true,
+        },
+    ];
+
+    // Merge static + dynamic, dynamic overrides if same name
+    const merged = [...staticServices];
+    for (const svc of dynamicServices) {
+        if (!merged.find(s => s.name === svc.name)) {
+            merged.push(svc);
+        }
+    }
+
+    res.json({ services: merged });
 });
 
 // Dynamic proxy — no x402 here, the target service handles payment

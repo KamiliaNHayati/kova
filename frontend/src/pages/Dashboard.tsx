@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useWallet } from "../context/WalletContext";
-import { getWallet, getSpentToday, setActive, getSpendNonce, getSpendRecord } from "../lib/contracts";
+import { getWallet, setActive, getSpendNonce, getSpendRecord } from "../lib/contracts";
 import { getSavedAgents, type AgentKeypair } from "../lib/agentKeys";
 import {
   Wallet,
@@ -16,6 +16,9 @@ import {
   Star,
   Bot,
   ChevronDown,
+  Cpu,
+  ActivitySquare,
+  Network
 } from "lucide-react";
 
 interface WalletData {
@@ -55,30 +58,18 @@ export default function Dashboard() {
   async function loadWallet() {
     const agentAddr = agents[selectedAgentIdx]?.address;
     if (!agentAddr) {
-      console.debug("[Dashboard] loadWallet: no agent selected");
       setWalletData(null);
       setHasWallet(false);
       return;
     }
 
     setLoading(true);
-    console.log("[Dashboard] Loading wallet for owner:", address, "agent:", agentAddr);
-
     try {
       const result = await getWallet(address!, agentAddr);
-      // debug: log the raw result so you can paste it here if still failing
-      console.debug("[Dashboard] getWallet raw result:", JSON.stringify(result, null, 2));
-
-      // result comes from cvToJSON; it can have multiple shapes depending on optional/map
-      // Try to find the inner wallet object in common places:
-      // 1) result.value.value  (optional wrapping)
-      // 2) result.value        (sometimes direct)
-      // 3) result (if already the inner object)
       let payload: any = null;
       if (result === null || result === undefined) {
         payload = null;
       } else if (typeof result === "object") {
-        // prefer deepest optional: result.value.value
         if (result.value && result.value.value) payload = result.value.value;
         else if (result.value) payload = result.value;
         else payload = result;
@@ -86,10 +77,7 @@ export default function Dashboard() {
         payload = null;
       }
 
-      // Now payload may be the wallet map or null/other
-      // Check for the expected wallet fields
       if (payload && (payload.balance !== undefined || payload["daily-limit"] !== undefined || payload["per-call-limit"] !== undefined)) {
-        // Fields might be either nested { value: "123" } or raw numbers/strings
         const norm = (x: any) => {
           if (x === undefined || x === null) return "0";
           if (typeof x === "object" && "value" in x) return String(x.value);
@@ -112,8 +100,6 @@ export default function Dashboard() {
         });
         setHasWallet(true);
       } else {
-        // No wallet found
-        console.warn("[Dashboard] getWallet did not contain wallet fields; payload:", payload);
         setWalletData(null);
         setHasWallet(false);
       }
@@ -127,7 +113,7 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    if (!address || agents.length === 0) return; // just return, no setLoading
+    if (!address || agents.length === 0) return;
     loadWallet();
     loadSpendHistory();
   }, [address, selectedAgentIdx, agents]);
@@ -136,7 +122,6 @@ export default function Dashboard() {
     const agentAddr = agents[selectedAgentIdx]?.address;
     if (!address || !agentAddr) return;
     try {
-      // v3: getSpendNonce(owner, agent)
       const nonceResult = await getSpendNonce(address, agentAddr);
       const nonce = nonceResult?.value ? parseInt(nonceResult.value) : 0;
       if (nonce === 0) return;
@@ -146,7 +131,6 @@ export default function Dashboard() {
 
       for (let i = start; i < nonce; i++) {
         try {
-          // v3: getSpendRecord(owner, agent, nonce)
           const record = await getSpendRecord(address, agentAddr, i);
           if (record && record.value && record.value.value) {
             const v = record.value.value;
@@ -173,334 +157,327 @@ export default function Dashboard() {
     const newState = !wallet.active;
     setTxStatus(newState ? "Activating wallet..." : "Deactivating wallet...");
 
-    // call setActive; callback triggers polling to re-fetch wallet
     setActive(agentAddr, newState, () => {
       setTxStatus("Transaction submitted! Waiting for confirmation...");
-
       let attempts = 0;
       const poll = setInterval(async () => {
         attempts++;
         try {
-          await loadWallet(); // re-fetch on-chain state
-          // if loadWallet has found a wallet and state matches newState, we're done
+          await loadWallet();
           if (wallet && (wallet.active === newState)) {
             clearInterval(poll);
             setTxStatus("Wallet updated!");
             setTimeout(() => setTxStatus(""), 3000);
             return;
           }
-        } catch (e) {
-          console.debug("[Dashboard] toggleActive poll error:", e);
-        }
+        } catch (e) {}
 
         if (attempts >= 24) {
           clearInterval(poll);
-          setTxStatus("Timed out — refresh or check transaction status manually.");
+          setTxStatus("Timed out — check transaction manually.");
           setTimeout(() => setTxStatus(""), 5000);
         }
       }, 5000);
     });
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!hasWallet) {
-    return (
-      <div className="max-w-lg mx-auto mt-24 text-center">
-        <Wallet className="w-16 h-16 text-text-muted mx-auto mb-6" />
-        <h2 className="text-2xl font-bold mb-3">No Agent Wallet Found</h2>
-        <p className="text-text-muted mb-8">
-          Create your agent wallet to start managing autonomous AI spending
-          with on-chain rules.
-        </p>
-        <button
-          onClick={() => navigate("/setup")}
-          className="px-6 py-3 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-colors"
-        >
-          Create Wallet
-        </button>
-      </div>
-    );
-  }
-
-  const dailyUsagePercent = wallet
-    ? Math.min((wallet.spentToday / wallet.dailyLimit) * 100, 100)
-    : 0;
-
-  const stxBalance = wallet ? (wallet.balance / 1_000_000).toFixed(2) : "0";
-  const stxDailyLimit = wallet
-    ? (wallet.dailyLimit / 1_000_000).toFixed(2)
-    : "0";
-  const stxSpentToday = wallet
-    ? (wallet.spentToday / 1_000_000).toFixed(2)
-    : "0";
-  const stxPerCall = wallet
-    ? (wallet.perCallLimit / 1_000_000).toFixed(2)
-    : "0";
-
-  const maxSpend = spendHistory.length > 0 ? Math.max(...spendHistory.map(s => s.amount)) : 1;
-  const totalSpent = spendHistory.reduce((sum, s) => sum + s.amount, 0);
-  const successRate = spendHistory.length > 0 ? 100 : 0;
-
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-text-muted text-sm mt-1">
-            Monitor your agent wallet in real time
-          </p>
-        </div>
-        <button
-          onClick={toggleActive}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${wallet?.active
-            ? "bg-danger/10 text-danger hover:bg-danger/20"
-            : "bg-success/10 text-success hover:bg-success/20"
-            }`}
-        >
-          {wallet?.active ? (
-            <>
-              <ShieldOff className="w-4 h-4" />
-              Kill Switch
-            </>
-          ) : (
-            <>
-              <ShieldCheck className="w-4 h-4" />
-              Reactivate
-            </>
-          )}
-        </button>
+    <div className="min-h-screen w-full bg-[#030303] text-white pt-24 pb-20 px-6 font-sans relative overflow-x-hidden">
+      {/* Subtle Monochrome Auroras */}
+      <div className="fixed inset-0 pointer-events-none z-0">
+        <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-white opacity-[0.02] blur-[120px] rounded-full mix-blend-screen" />
+        <div className="absolute bottom-[20%] right-[-10%] w-[600px] h-[600px] bg-white opacity-[0.02] blur-[150px] rounded-full mix-blend-screen" />
       </div>
 
-      {/* Agent Selector */}
-      {agents.length > 0 && (
-        <div className="mb-6 max-w-sm relative">
-          <label className="block text-xs text-text-muted mb-1.5 uppercase">Active Agent</label>
-          <button
-            onClick={() => setAgentDropdownOpen(!agentDropdownOpen)}
-            className="w-full flex items-center justify-between px-4 py-3 bg-surface border border-border rounded-xl hover:border-accent/40 transition-all"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-warning/10 flex items-center justify-center">
-                <Bot className="w-4 h-4 text-warning" />
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-medium text-white">{agents[selectedAgentIdx]?.label || "Agent"}</p>
-                <p className="text-[10px] font-mono text-text-muted truncate max-w-[220px]">{agents[selectedAgentIdx]?.address || "—"}</p>
-              </div>
+      <div className="max-w-6xl mx-auto relative z-10 animate-fade-in">
+        
+        {/* Loading State */}
+        {loading ? (
+          <div className="flex flex-col items-center justify-center min-h-[60vh] text-white">
+            <div className="relative w-12 h-12 flex items-center justify-center mb-4">
+              <div className="absolute inset-0 border-2 border-white/10 rounded-full" />
+              <div className="absolute inset-0 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <Cpu className="w-4 h-4 text-white/80" />
             </div>
-            <ChevronDown className={`w-4 h-4 text-text-muted transition-transform ${agentDropdownOpen ? "rotate-180" : ""}`} />
-          </button>
-          {agentDropdownOpen && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-xl overflow-hidden shadow-xl z-50">
-              {agents.map((agent, idx) => (
+            <p className="text-xs font-mono uppercase tracking-widest text-cyan-400 drop-shadow-[0_0_5px_rgba(34,211,238,0.5)]">Syncing with Stacks</p>
+          </div>
+        ) : !hasWallet ? (
+          /* No Wallet State */
+          <div className="max-w-lg mx-auto mt-16 text-center p-10 rounded-[2.5rem] bg-white/[0.02] border border-white/[0.05] backdrop-blur-xl shadow-2xl">
+            <div className="w-20 h-20 mx-auto rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center mb-8 shadow-inner">
+              <Wallet className="w-8 h-8 text-cyan-400" />
+            </div>
+            <h2 className="text-2xl font-medium tracking-tight text-white mb-3">No Agent Wallet Found</h2>
+            <p className="text-white/50 mb-8 font-light leading-relaxed">
+              Create your agent wallet to start managing autonomous AI spending
+              with on-chain rules.
+            </p>
+            <button
+              onClick={() => navigate("/setup")}
+              className="px-8 py-3.5 bg-white text-black text-sm font-semibold rounded-full transition-all duration-300 hover:shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:scale-105"
+            >
+              Create Wallet
+            </button>
+          </div>
+        ) : (
+          /* Main Dashboard */
+          <>
+            {/* ─── Header & Kill Switch ──────────────────────────────── */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className={`w-2 h-2 rounded-full ${wallet?.active ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]" : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"}`} />
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-white/50">
+                    System Status: <span className={wallet?.active ? "text-cyan-400" : "text-red-400"}>{wallet?.active ? "Online" : "Frozen"}</span>
+                  </span>
+                </div>
+                <h1 className="text-3xl md:text-4xl font-medium text-white tracking-tight">Agent Dashboard</h1>
+              </div>
+
+              {/* Minimal Kill Switch */}
+              <button
+                onClick={toggleActive}
+                className="group flex items-center gap-2 px-6 py-3 rounded-full font-medium text-sm transition-all duration-300 border bg-white/[0.02] border-white/[0.05] hover:bg-white/[0.06] hover:border-white/[0.1] text-white/80 hover:text-white"
+              >
+                {wallet?.active ? (
+                  <>
+                    <ShieldOff className="w-4 h-4 text-red-400 transition-transform group-hover:scale-110" />
+                    Engage Kill Switch
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4 text-cyan-400 transition-transform group-hover:scale-110" />
+                    Reactivate Agent
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* ─── Status & Notifications ────────────────────────────── */}
+            {txStatus && (
+              <div className="flex items-center gap-3 p-4 mb-6 rounded-2xl bg-white/[0.02] border border-white/10 backdrop-blur-md">
+                {txStatus !== "Wallet updated!" ? (
+                  <div className="w-4 h-4 border-2 border-white/40 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-cyan-400" />
+                )}
+                <span className="text-sm text-cyan-400 font-light drop-shadow-[0_0_5px_rgba(34,211,238,0.3)]">{txStatus}</span>
+              </div>
+            )}
+
+            {!wallet?.active && (
+              <div className="flex items-center gap-3 p-4 mb-8 rounded-2xl bg-white/[0.02] border border-white/10 backdrop-blur-md">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+                <span className="text-sm text-white/80 font-light tracking-wide">
+                  Wallet is strictly deactivated. The smart contract will block all agent payments.
+                </span>
+              </div>
+            )}
+
+            {/* ─── Agent Selector ─────────────────── */}
+            {agents.length > 0 && (
+              <div className="mb-8 max-w-sm relative z-40">
+                <label className="block text-[10px] font-mono text-cyan-400/80 mb-2 uppercase tracking-widest">Active Node</label>
                 <button
-                  key={agent.address}
-                  onClick={() => { setSelectedAgentIdx(idx); setAgentDropdownOpen(false); }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-accent/5 transition-colors text-left ${idx === selectedAgentIdx ? "bg-accent/10 border-l-2 border-accent" : ""}`}
+                  onClick={() => setAgentDropdownOpen(!agentDropdownOpen)}
+                  className="w-full flex items-center justify-between px-4 py-3 bg-white/[0.02] border border-white/[0.08] rounded-2xl hover:bg-white/[0.04] transition-all"
                 >
-                  <Bot className="w-4 h-4 text-warning flex-shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium text-white">{agent.label}</p>
-                    <p className="text-[10px] font-mono text-text-muted truncate max-w-[220px]">{agent.address}</p>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-cyan-500/[0.05] border border-cyan-400/20 flex items-center justify-center shadow-inner">
+                      <Bot className="w-4 h-4 text-cyan-400" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-sm font-medium text-white/90">{agents[selectedAgentIdx]?.label || "Agent Node"}</p>
+                      <p className="text-[10px] font-mono text-cyan-400/60 truncate max-w-[200px]">{agents[selectedAgentIdx]?.address || "—"}</p>
+                    </div>
                   </div>
+                  <ChevronDown className={`w-4 h-4 text-cyan-400/60 transition-transform duration-300 ${agentDropdownOpen ? "rotate-180" : ""}`} />
                 </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}      {/* Transaction status */}
-      {txStatus && (
-        <div className="flex items-center gap-3 p-4 mb-4 rounded-lg bg-accent/10 border border-accent/20">
-          {txStatus !== "Wallet updated!" ? (
-            <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-          ) : (
-            <CheckCircle2 className="w-4 h-4 text-accent animate-fade-in-scale" />
-          )}
-          <span className="text-sm text-accent font-medium">{txStatus}</span>
-        </div>
-      )}
-
-      {/* Status banner */}
-      {!wallet?.active && (
-        <div className="flex items-center gap-3 p-4 mb-6 rounded-lg bg-danger/10 border border-danger/20">
-          <AlertTriangle className="w-5 h-5 text-danger" />
-          <span className="text-sm text-danger font-medium">
-            Wallet is deactivated. Agent cannot make any payments.
-          </span>
-        </div>
-      )}
-
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <StatCard
-          label="Balance"
-          value={`${stxBalance} STX`}
-          icon={<Wallet className="w-5 h-5" />}
-        />
-        <StatCard
-          label="Spent Today"
-          value={`${stxSpentToday} STX`}
-          icon={<ArrowUpRight className="w-5 h-5" />}
-          accent={dailyUsagePercent > 80 ? "warning" : undefined}
-        />
-        <StatCard
-          label="Daily Limit"
-          value={`${stxDailyLimit} STX`}
-          icon={<TrendingUp className="w-5 h-5" />}
-        />
-        <StatCard
-          label="Per-Call Limit"
-          value={`${stxPerCall} STX`}
-          icon={<ArrowDownRight className="w-5 h-5" />}
-        />
-      </div>
-
-      {/* Daily usage bar */}
-      <div className="p-6 rounded-xl bg-surface border border-border mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-sm font-medium">Daily Budget Usage</span>
-          <span className="text-sm text-text-muted">
-            {stxSpentToday} / {stxDailyLimit} STX
-          </span>
-        </div>
-        <div className="h-3 bg-surface-2 rounded-full overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${dailyUsagePercent > 80 ? "bg-warning" : "bg-accent"
-              }`}
-            style={{ width: `${dailyUsagePercent}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Spend History Chart + Agent Reputation — side by side */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        {/* Spend chart */}
-        <div className="md:col-span-2 p-6 rounded-xl bg-surface border border-border">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-accent" />
-              <h3 className="text-sm font-medium">Spend History</h3>
-            </div>
-            <span className="text-xs text-text-muted">
-              Last {spendHistory.length} transactions
-            </span>
-          </div>
-
-          {spendHistory.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-text-muted text-sm">
-              No transactions yet. Run the agent to see data here!
-            </div>
-          ) : (
-            <div className="flex items-end gap-2 h-32">
-              {[...spendHistory].sort((a, b) => a.amount - b.amount).map((entry, idx) => {
-                const heightPercent = (entry.amount / maxSpend) * 100;
-                const amountSTX = (entry.amount / 1_000_000).toFixed(4);
-                return (
-                  <div
-                    key={entry.nonce}
-                    className="flex-1 flex flex-col items-center gap-1 group"
-                  >
-                    <span className="text-[9px] text-text-muted opacity-0 group-hover:opacity-100 transition-opacity">
-                      {amountSTX}
-                    </span>
-                    <div
-                      className="w-full bg-gradient-to-t from-accent to-accent-hover rounded-t transition-all duration-300 group-hover:from-accent-hover group-hover:to-teal min-h-[4px]"
-                      style={{ height: `${Math.max(heightPercent, 5)}%` }}
-                      title={`#${idx + 1}: ${amountSTX} STX → ${entry.service.slice(0, 8)}...`}
-                    />
-                    <span className="text-[8px] text-text-muted">{idx + 1}</span>
+                
+                {agentDropdownOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-white/10 rounded-2xl overflow-hidden shadow-2xl z-50 py-1">
+                    {agents.map((agent, idx) => (
+                      <button
+                        key={agent.address}
+                        onClick={() => { setSelectedAgentIdx(idx); setAgentDropdownOpen(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors text-left ${idx === selectedAgentIdx ? "bg-white/[0.02] relative" : ""}`}
+                      >
+                        {idx === selectedAgentIdx && <div className="absolute left-0 top-0 bottom-0 w-1 bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]" />}
+                        <Bot className={`w-4 h-4 flex-shrink-0 ${idx === selectedAgentIdx ? "text-cyan-400" : "text-white/40"}`} />
+                        <div>
+                          <p className={`text-sm font-medium ${idx === selectedAgentIdx ? "text-white" : "text-white/70"}`}>{agent.label}</p>
+                          <p className={`text-[10px] font-mono truncate max-w-[220px] ${idx === selectedAgentIdx ? "text-cyan-400/60" : "text-white/40"}`}>{agent.address}</p>
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                );
-              })}
-            </div>
-          )}
+                )}
+              </div>
+            )}
 
-          {spendHistory.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-xs text-text-muted">
-              <span>Total: {(totalSpent / 1_000_000).toFixed(4)} STX</span>
-              <span>{spendHistory.length} transactions</span>
+            {/* ─── Stat Cards (ALL NUMBERS GLOWING CYAN) ─── */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <StatCard
+                label="Total Escrow Balance"
+                value={`${(wallet.balance / 1_000_000).toFixed(2)} STX`}
+                icon={<Wallet className="w-4 h-4" />}
+              />
+              <StatCard
+                label="Spent Today"
+                value={`${(wallet.spentToday / 1_000_000).toFixed(2)} STX`}
+                icon={<ArrowUpRight className="w-4 h-4" />}
+              />
+              <StatCard
+                label="Hard Daily Limit"
+                value={`${(wallet.dailyLimit / 1_000_000).toFixed(2)} STX`}
+                icon={<TrendingUp className="w-4 h-4" />}
+              />
+              <StatCard
+                label="Max Per-Call Limit"
+                value={`${(wallet.perCallLimit / 1_000_000).toFixed(2)} STX`}
+                icon={<ArrowDownRight className="w-4 h-4" />}
+              />
             </div>
-          )}
-        </div>
 
-        {/* Agent Reputation */}
-        <div className="p-6 rounded-xl bg-surface border border-border">
-          <div className="flex items-center gap-2 mb-4">
-            <Star className="w-4 h-4 text-warning" />
-            <h3 className="text-sm font-medium">Agent Reputation</h3>
-          </div>
+            {/* ─── Daily Usage Gauge (All Cyan) ─── */}
+            <div className="p-6 md:p-8 rounded-3xl bg-white/[0.02] border border-white/[0.05] mb-6 backdrop-blur-sm relative overflow-hidden">
+              <div className="flex items-end justify-between mb-4 relative z-10">
+                <div>
+                  <h3 className="text-sm font-medium text-white/90">Daily Budget Utilization</h3>
+                  <p className="text-xs text-white/40 font-light mt-1">Resets based on block height (~24h)</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-xl font-medium tracking-tight text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
+                    {(wallet.spentToday / 1_000_000).toFixed(2)} <span className="text-sm opacity-80 text-cyan-400/80">/ {(wallet.dailyLimit / 1_000_000).toFixed(2)} STX</span>
+                  </span>
+                </div>
+              </div>
+              
+              <div className="h-2 bg-white/[0.04] rounded-full overflow-hidden relative z-10 border border-white/[0.02]">
+                <div
+                  className="h-full rounded-full transition-all duration-1000 ease-out bg-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.8)]"
+                  style={{ width: `${Math.min(wallet.dailyLimit > 0 ? (wallet.spentToday / wallet.dailyLimit) * 100 : 0, 100)}%` }}
+                ></div>
+              </div>
+            </div>
 
-          <div className="text-center py-4">
-            <div className="text-4xl font-bold gradient-text mb-1">
-              {successRate}%
-            </div>
-            <p className="text-xs text-text-muted">Success Rate</p>
-          </div>
+            {/* ─── Charts & Data Panel ───────────────────────────────── */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+              
+              {/* Spend History Terminal */}
+              <div className="lg:col-span-2 p-6 md:p-8 rounded-3xl bg-white/[0.02] border border-white/[0.05] backdrop-blur-sm flex flex-col">
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-cyan-500/[0.05] border border-cyan-400/20">
+                      <BarChart3 className="w-4 h-4 text-cyan-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-medium text-white/90">Transaction History</h3>
+                      <p className="text-xs text-white/40 font-light">Last <span className="text-cyan-400">{spendHistory.length}</span> successful agent calls</p>
+                    </div>
+                  </div>
+                </div>
 
-          <div className="space-y-3 mt-4">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-muted">Total Spends</span>
-              <span className="font-medium">{spendHistory.length}</span>
+                {spendHistory.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center min-h-[160px] text-cyan-400/40 text-sm font-light border border-dashed border-cyan-400/10 rounded-2xl bg-cyan-500/[0.02]">
+                    <ActivitySquare className="w-6 h-6 mb-2 opacity-50" />
+                    Awaiting agent telemetry...
+                  </div>
+                ) : (
+                  <div className="flex-1 flex items-end gap-2 min-h-[160px] pt-4">
+                    {[...spendHistory].sort((a, b) => a.nonce - b.nonce).map((entry, idx) => {
+                      const maxSpend = Math.max(...spendHistory.map(s => s.amount));
+                      const heightPercent = (entry.amount / maxSpend) * 100;
+                      const amountSTX = (entry.amount / 1_000_000).toFixed(4);
+                      return (
+                        <div key={entry.nonce} className="flex-1 flex flex-col items-center gap-2 group relative">
+                          <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-cyan-950/80 backdrop-blur-md border border-cyan-400/30 px-3 py-2 rounded-lg text-center z-20 pointer-events-none shadow-[0_0_15px_rgba(34,211,238,0.3)] min-w-[100px]">
+                            <span className="block text-xs font-medium text-cyan-400">{amountSTX} STX</span>
+                            <span className="block text-[9px] font-mono text-cyan-400/60 truncate w-20 mx-auto mt-1">{entry.service}</span>
+                          </div>
+                          
+                          <div className="w-full relative group-hover:-translate-y-1 transition-transform duration-300">
+                            <div
+                              className="w-full bg-cyan-500/20 rounded-sm min-h-[4px] border border-cyan-400/20 group-hover:bg-cyan-400/80 group-hover:shadow-[0_0_10px_rgba(34,211,238,0.6)] transition-all"
+                              style={{ height: `${Math.max(heightPercent, 5)}%` }}
+                            />
+                          </div>
+                          
+                          <span className="text-[9px] font-mono text-cyan-400/30 group-hover:text-cyan-400 transition-colors">#{entry.nonce}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {spendHistory.length > 0 && (
+                  <div className="mt-8 pt-4 border-t border-white/[0.05] flex items-center justify-between text-xs font-mono text-cyan-400 drop-shadow-[0_0_5px_rgba(34,211,238,0.3)]">
+                    <span>VOL: {(spendHistory.reduce((sum, s) => sum + s.amount, 0) / 1_000_000).toFixed(4)} STX</span>
+                    <span>TXS: {spendHistory.length}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Agent Reputation Dashboard */}
+              <div className="p-6 md:p-8 rounded-3xl bg-white/[0.02] border border-white/[0.05] backdrop-blur-sm relative overflow-hidden flex flex-col">
+                <div className="flex items-center gap-3 mb-8 relative z-10">
+                  <div className="p-2 rounded-lg bg-cyan-500/[0.05] border border-cyan-400/20">
+                    <Star className="w-4 h-4 text-cyan-400" />
+                  </div>
+                  <h3 className="text-sm font-medium text-white/90">Agent Analytics</h3>
+                </div>
+
+                <div className="text-center py-6 mb-4 relative z-10">
+                  <div className="text-5xl font-light text-cyan-400 drop-shadow-[0_0_12px_rgba(34,211,238,0.5)] tracking-tight mb-2">
+                    {spendHistory.length > 0 ? "100" : "0"}%
+                  </div>
+                  <p className="text-xs font-mono tracking-widest uppercase text-white/40">Execution Rate</p>
+                </div>
+
+                <div className="space-y-4 mt-auto relative z-10">
+                  <div className="flex items-center justify-between text-sm py-2 border-b border-white/[0.03]">
+                    <span className="text-white/40 font-light">Total Calls</span>
+                    <span className="font-medium text-cyan-400 font-mono drop-shadow-[0_0_5px_rgba(34,211,238,0.3)]">{spendHistory.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm py-2 border-b border-white/[0.03]">
+                    <span className="text-white/40 font-light">Avg. Cost</span>
+                    <span className="font-medium text-cyan-400 font-mono drop-shadow-[0_0_5px_rgba(34,211,238,0.3)]">
+                      {spendHistory.length > 0 ? (spendHistory.reduce((sum, s) => sum + s.amount, 0) / spendHistory.length / 1_000_000).toFixed(4) : "0"} STX
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm py-2">
+                    <span className="text-white/40 font-light">Network Trust</span>
+                    <span className="font-medium text-cyan-400 flex items-center gap-1.5 font-mono text-xs drop-shadow-[0_0_5px_rgba(34,211,238,0.3)]">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      {spendHistory.length >= 5 ? "ESTABLISHED" : spendHistory.length >= 1 ? "BUILDING" : "NEW"}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-muted">Total Volume</span>
-              <span className="font-medium">{(totalSpent / 1_000_000).toFixed(4)} STX</span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-muted">Avg per Tx</span>
-              <span className="font-medium">
-                {spendHistory.length > 0
-                  ? (totalSpent / spendHistory.length / 1_000_000).toFixed(4)
-                  : "0"} STX
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-muted">Trust Level</span>
-              <span className="font-medium text-success flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" />
-                {spendHistory.length >= 5 ? "Established" : spendHistory.length >= 1 ? "Building" : "New"}
-              </span>
-            </div>
-          </div>
-        </div>
+
+            {/* ─── Infrastructure Config ───────────────── */}
+            <AgentConfigSection address={address!} wallet={wallet} />
+          </>
+        )}
       </div>
-
-      {/* Agent info */}
-      <AgentConfigSection address={address!} wallet={wallet} />
     </div>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  icon,
-  accent,
-}: {
-  label: string;
-  value: string;
-  icon: React.ReactNode;
-  accent?: "warning" | "danger";
-}) {
-  const accentColor =
-    accent === "warning"
-      ? "text-warning"
-      : accent === "danger"
-        ? "text-danger"
-        : "text-accent";
+// ─── HELPER COMPONENTS ──────────────────────────────────────
 
+function StatCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
-    <div className="p-5 rounded-xl bg-surface border border-border">
-      <div className={`mb-3 ${accentColor}`}>{icon}</div>
-      <p className="text-2xl font-bold">{value}</p>
-      <p className="text-xs text-text-muted mt-1">{label}</p>
+    <div className="p-6 rounded-3xl bg-white/[0.02] border border-white/[0.05] backdrop-blur-sm hover:bg-white/[0.03] transition-colors relative overflow-hidden group">
+      <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-6 border bg-cyan-500/[0.05] border-cyan-400/20 text-cyan-400">
+        {icon}
+      </div>
+      {/* Numbers are ALWAYS glowing Cyan */}
+      <p className="text-2xl md:text-3xl font-medium tracking-tight mb-1 text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
+        {value}
+      </p>
+      <p className="text-[11px] font-mono uppercase tracking-widest text-white/40">{label}</p>
     </div>
   );
 }
@@ -509,49 +486,55 @@ function AgentConfigSection({ address, wallet }: { address: string; wallet: Wall
   const agents = getSavedAgents(address);
 
   return (
-    <div className="p-6 rounded-xl bg-surface border border-border">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-medium">Authorized Agents</h3>
-        <span className="text-xs text-text-muted">{agents.length || 1} / 5</span>
+    <div className="p-6 md:p-8 rounded-3xl bg-white/[0.02] border border-white/[0.05] backdrop-blur-sm">
+      <div className="flex items-center justify-between mb-8 border-b border-white/[0.05] pb-4">
+        <div className="flex items-center gap-3">
+          <Network className="w-4 h-4 text-cyan-400" />
+          <h3 className="text-sm font-medium text-white/90">Authorized Network Nodes</h3>
+        </div>
+        <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-widest px-3 py-1 bg-cyan-500/[0.05] rounded-full border border-cyan-400/20 drop-shadow-[0_0_5px_rgba(34,211,238,0.3)]">
+          Capacity: {agents.length || 1} / 5
+        </span>
       </div>
 
-      <div className="space-y-2 mb-4">
+      <div className="space-y-3 mb-8">
         {agents.length > 0 ? (
           agents.map((agent, i) => (
-            <div key={agent.address} className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-black/20 border border-border/30">
-              <div className="flex items-center gap-3">
-                <span className="w-6 h-6 rounded-md bg-warning/20 flex items-center justify-center text-[10px] font-bold text-warning">
-                  {i + 1}
+            <div key={agent.address} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-2xl bg-white/[0.01] border border-white/[0.03] hover:border-cyan-400/20 transition-colors gap-4 sm:gap-0">
+              <div className="flex items-center gap-4">
+                <span className="w-8 h-8 rounded-lg bg-cyan-500/[0.05] border border-cyan-400/20 flex items-center justify-center text-[11px] font-mono text-cyan-400">
+                  {String(i + 1).padStart(2, '0')}
                 </span>
                 <div>
-                  <p className="text-xs font-medium text-white">{agent.label}</p>
-                  <p className="text-[10px] font-mono text-text-muted truncate max-w-[220px]">{agent.address}</p>
+                  <p className="text-sm font-medium text-white/90">{agent.label}</p>
+                  <p className="text-[11px] font-mono text-white/40 truncate max-w-[200px] md:max-w-md">{agent.address}</p>
                 </div>
               </div>
-              <span className="text-[10px] font-medium text-success">Active</span>
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-cyan-400/20 bg-cyan-500/[0.05] w-fit">
+                <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_5px_rgba(34,211,238,0.8)]" />
+                <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-400">Deployed</span>
+              </div>
             </div>
           ))
         ) : (
-          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-black/20 border border-border/30">
-            <div className="flex items-center gap-3">
-              <span className="w-6 h-6 rounded-md bg-warning/20 flex items-center justify-center text-[10px] font-bold text-warning">1</span>
-              <p className="text-[10px] font-mono text-text-muted truncate max-w-[280px]">{agents[0]?.address || "—"}</p>
-            </div>
-            <span className="text-[10px] font-medium text-success">Active</span>
+          <div className="p-4 rounded-2xl bg-white/[0.01] border border-white/[0.03] text-center">
+            <p className="text-sm text-cyan-400/50 font-light">No agents registered on this machine.</p>
           </div>
         )}
       </div>
 
-      <div className="space-y-2 pt-3 border-t border-border/50">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-text-muted">Status</span>
-          <span className={`text-xs font-medium ${wallet?.active ? "text-success" : "text-danger"}`}>
-            {wallet?.active ? "Active" : "Deactivated"}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="p-4 rounded-2xl bg-white/[0.01] border border-white/[0.03] flex items-center justify-between">
+          <span className="text-xs text-white/40 font-light">Smart Contract Status</span>
+          <span className={`text-[10px] font-mono uppercase tracking-widest px-2 py-1 rounded border ${
+            wallet?.active ? "bg-cyan-500/10 border-cyan-400/20 text-cyan-400 shadow-[0_0_5px_rgba(34,211,238,0.2)]" : "bg-red-500/10 border-red-500/20 text-red-400"
+          }`}>
+            {wallet?.active ? "Active" : "Halted"}
           </span>
         </div>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-text-muted">Protocol Fee</span>
-          <span className="text-xs text-text-muted">2% per transaction</span>
+        <div className="p-4 rounded-2xl bg-white/[0.01] border border-white/[0.03] flex items-center justify-between">
+          <span className="text-xs text-white/40 font-light">Kova Protocol Fee</span>
+          <span className="text-[11px] font-mono text-cyan-400 drop-shadow-[0_0_5px_rgba(34,211,238,0.3)]">2.00% / TX</span>
         </div>
       </div>
     </div>

@@ -13,64 +13,62 @@ import {
   Bot,
   Activity,
   CheckCircle2,
-  ChevronRight,
-  FileText,
-  Package,
-  RefreshCw,
+  Terminal,
+  Network
 } from "lucide-react";
 
+// ─── DATA ────────────────────────────────────────────────────────
 const features = [
   {
     icon: Lock,
     title: "On-Chain Spending Rules",
-    desc: "Daily limits, per-call caps, and service allowlists — all enforced by Clarity smart contracts.",
-    gradient: "from-indigo-500/20 to-indigo-600/5",
+    desc: "Daily limits, per-call caps, and service allowlists — all enforced securely by Clarity smart contracts on the Stacks blockchain.",
+    colSpan: "md:col-span-2 lg:col-span-8", // Full width on tablet, wide on desktop
   },
   {
     icon: Zap,
-    title: "Autonomous X402 Payments",
-    desc: "Your AI agent discovers services, negotiates HTTP 402 paywalls, and pays instantly.",
-    gradient: "from-teal-500/20 to-emerald-600/5",
+    title: "X402 Payments",
+    desc: "Your AI agent discovers services and negotiates HTTP 402 paywalls instantly.",
+    colSpan: "md:col-span-1 lg:col-span-4", // Half width on tablet, narrow on desktop
   },
   {
     icon: Eye,
     title: "Full Transparency",
-    desc: "Every spend is logged on-chain with nonce-based tracking. Real-time activity feed included.",
-    gradient: "from-violet-500/20 to-purple-600/5",
+    desc: "Every satoshi spent is logged on-chain with strict nonce-based tracking.",
+    colSpan: "md:col-span-1 lg:col-span-4", // Half width on tablet, narrow on desktop
   },
   {
     icon: Shield,
     title: "Instant Kill Switch",
-    desc: "One click to freeze all agent spending. Your agent's rules are enforced on-chain.",
-    gradient: "from-amber-500/20 to-orange-600/5",
+    desc: "Maintain absolute control. One click freezes all agent spending immediately.",
+    colSpan: "md:col-span-2 lg:col-span-8", // Full width on tablet, wide on desktop
   },
 ];
 
 const steps = [
   {
-    num: "1",
+    num: "01",
     icon: Wallet,
-    title: "Set Rules & Assign",
-    desc: "Set spending limits, assign your AI agent, and allowlist services.",
-    color: "from-indigo-500 to-indigo-600",
+    title: "Fund & Restrict",
+    desc: "Deposit STX into the smart escrow and set your hard spending limits.",
   },
   {
-    num: "2",
+    num: "02",
     icon: Bot,
-    title: "Agent Operates",
-    desc: "Your agent pays for services via X402 — within your rules.",
-    color: "from-teal-500 to-emerald-600",
+    title: "Deploy Agent",
+    desc: "Your AI autonomously navigates X402 paywalls within your boundaries.",
   },
   {
-    num: "3",
+    num: "03",
     icon: Activity,
-    title: "Monitor & Control",
-    desc: "Real-time dashboard. Adjust limits or kill switch anytime.",
-    color: "from-violet-500 to-purple-600",
+    title: "Monitor & Kill",
+    desc: "Track every transaction live on-chain, and pull the plug instantly if needed.",
   },
 ];
 
-// 3D Vanta.js Background
+// ─── COMPONENTS ──────────────────────────────────────────────────
+
+// Vanta Background - Tidy, dark, and highly optimized
 function Background3D() {
   const [vantaEffect, setVantaEffect] = useState<any>(null);
   const vantaRef = useRef(null);
@@ -81,14 +79,14 @@ function Background3D() {
         NET({
           el: vantaRef.current,
           THREE: THREE,
-          color: 0xf4791f, // Stacks orange
-          backgroundColor: 0x0f1626,
-          backgroundAlpha: 0.0, // Transparent to show CSS gradients
-          points: 6.50, // Reduced from 8.00 by ~20%
-          maxDistance: 26.00,
-          spacing: 24.00,
+          color: 0x444444, // Subtle grey
+          backgroundColor: 0x030303, // True black
+          backgroundAlpha: 1.0,
+          points: 6.00,
+          maxDistance: 24.00,
+          spacing: 30.00,
           showDots: true,
-          speed: 0.5, // Reduced animation speed
+          speed: 0.1, 
         })
       );
     }
@@ -97,17 +95,17 @@ function Background3D() {
     };
   }, [vantaEffect]);
 
-  return <div ref={vantaRef} className="absolute inset-0 pointer-events-none z-0 opacity-20" />; // Reduced opacity to keep focus off background
+  return <div ref={vantaRef} className="absolute inset-0 pointer-events-none z-0 opacity-20 mix-blend-screen" />;
 }
 
-function FadeInView({ children, delay = 0 }: { children: React.ReactNode, delay?: number }) {
+// Fade Animation Wrapper (Now accepts className for grid support!)
+function FadeInView({ children, delay = 0, className = "" }: { children: React.ReactNode, delay?: number, className?: string }) {
   const domRef = useRef<HTMLDivElement>(null);
   const [isVisible, setVisible] = useState(false);
 
   useEffect(() => {
     const el = domRef.current;
     if (!el) return;
-
     const observer = new IntersectionObserver(entries => {
       entries.forEach(entry => {
         if (entry.isIntersecting) {
@@ -116,7 +114,6 @@ function FadeInView({ children, delay = 0 }: { children: React.ReactNode, delay?
         }
       });
     }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
-
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
@@ -124,8 +121,7 @@ function FadeInView({ children, delay = 0 }: { children: React.ReactNode, delay?
   return (
     <div
       ref={domRef}
-      className={`transition-all duration-1000 ease-out ${isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-12"
-        }`}
+      className={`transition-all duration-1000 ease-out ${isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"} ${className}`}
       style={{ transitionDelay: `${delay}ms` }}
     >
       {children}
@@ -133,292 +129,171 @@ function FadeInView({ children, delay = 0 }: { children: React.ReactNode, delay?
   );
 }
 
-// Animated transaction flow in the hero
+// Cleaned up, centered glass terminal
 function LiveFlowDemo() {
   const [step, setStep] = useState(0);
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setStep((prev) => (prev + 1) % 5);
+      setStep((prev) => (prev + 1) % 6);
     }, 2200);
     return () => clearInterval(timer);
   }, []);
 
   const flowSteps = [
-    { label: "Agent requests /api/data", icon: <Bot className="w-5 h-5" />, color: "text-accent" },
-    { label: "Service: 402 — Pay 0.01 STX", icon: <Lock className="w-5 h-5" />, color: "text-amber-400" },
-    { label: "validate-spend → Rules OK?", icon: <FileText className="w-5 h-5" />, color: "text-purple-400" },
-    { label: "✓ verified · ✓ within limits", icon: <CheckCircle2 className="w-5 h-5 text-success" />, color: "text-success" },
-    { label: "200 OK — Data received!", icon: <Package className="w-5 h-5 text-teal-400" />, color: "text-teal-400" },
+    { label: "Agent requests /.well-known/x402", color: "text-white/60" },
+    { label: "Paywall Hit: 402 Payment Required (0.5 STX)", color: "text-amber-400/80" },
+    { label: "Verifying Clarity smart contract rules...", color: "text-white/80" },
+    { label: "✓ Rules validated · Escrow transferred", color: "text-emerald-400" },
+    { label: "200 OK — Data payload delivered", color: "text-white" },
   ];
 
+  const isSuccessState = step >= 3 && step < 5;
+
   return (
-    <div className="relative max-w-md mx-auto mt-16 animate-slide-up-d3">
-      <div className="p-5 rounded-2xl bg-surface/60 border border-border backdrop-blur-md">
-        <div className="flex items-center gap-2 mb-4">
-          <div className="w-2.5 h-2.5 rounded-full bg-danger" />
-          <div className="w-2.5 h-2.5 rounded-full bg-warning" />
-          <div className="w-2.5 h-2.5 rounded-full bg-success" />
-          <span className="text-[10px] text-text-muted ml-2 font-mono">kova-agent-demo</span>
+    <div className="relative max-w-2xl mx-auto mt-16 w-full">
+      {/* Background glow that reacts to success state */}
+      <div className={`absolute -inset-4 blur-3xl transition-colors duration-1000 rounded-full opacity-30 ${isSuccessState ? "bg-emerald-500/20" : "bg-white/5"}`} />
+      
+      <div className={`relative p-6 md:p-8 rounded-3xl bg-white/[0.02] border backdrop-blur-xl shadow-2xl transition-all duration-700 ${isSuccessState ? "border-emerald-500/30" : "border-white/[0.08]"}`}>
+        
+        {/* Terminal Header */}
+        <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/[0.05]">
+          <div className="flex items-center gap-3">
+            <Terminal className="w-4 h-4 text-white/40" />
+            <span className="text-xs font-mono text-white/60 tracking-widest uppercase">Kova_Agent_Node</span>
+          </div>
+          <div className={`px-3 py-1 rounded-full text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 border ${isSuccessState ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-white/[0.03] border-white/[0.05] text-white/40"}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${isSuccessState ? "bg-emerald-400" : "bg-amber-400/80 animate-pulse"}`} />
+            {isSuccessState ? "Settled" : "Processing"}
+          </div>
         </div>
-        <div className="space-y-2 font-mono text-xs">
+
+        {/* Terminal Body */}
+        <div className="space-y-4 font-mono text-xs md:text-sm text-left">
           {flowSteps.map((s, i) => (
             <div
               key={i}
-              className={`flex items-center gap-3 transition-all duration-500 scale-100 ${i <= step ? "opacity-100 translate-x-0" : "opacity-0 translate-x-4"
-                }`}
+              className={`flex items-start gap-3 transition-all duration-500 ${
+                  i <= step && step < 5 ? "opacity-100 translate-x-0" : "opacity-0 pointer-events-none h-0 overflow-hidden"
+              }`}
             >
-              <span className="flex items-center justify-center text-base">{s.icon}</span>
-              <span className={i === step ? s.color + " font-medium" : "text-text-muted"}>
+              <span className="text-white/30 mt-0.5">{`>`}</span>
+              <span className={i === step ? s.color + " font-medium" : "text-white/40"}>
                 {s.label}
               </span>
-              {i < step && <CheckCircle2 className="w-3.5 h-3.5 text-success/60 ml-auto animate-fade-in-scale" />}
-              {i === step && (
-                <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse ml-auto" />
-              )}
+              {i < step && <CheckCircle2 className="w-4 h-4 text-emerald-500/60 ml-auto shrink-0" />}
+              {i === step && <div className="w-2 h-4 bg-white/60 animate-pulse ml-2 mt-0.5" />}
             </div>
           ))}
         </div>
       </div>
-
-      {/* Glow effect under the terminal */}
-      <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-3/4 h-8 bg-accent/10 blur-xl rounded-full" />
     </div>
   );
 }
 
-// Animated counter
-function AnimatedNumber({ target, suffix = "" }: { target: number; suffix?: string }) {
-  const [value, setValue] = useState(0);
-
-  useEffect(() => {
-    let start = 0;
-    const duration = 2000;
-    const startTime = Date.now();
-
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      start = Math.floor(eased * target);
-      setValue(start);
-      if (progress < 1) requestAnimationFrame(animate);
-    };
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          animate();
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.5 }
-    );
-
-    const el = document.getElementById(`stat-${target}`);
-    if (el) observer.observe(el);
-    return () => observer.disconnect();
-  }, [target]);
-
-  return (
-    <span id={`stat-${target}`}>
-      {value.toLocaleString()}
-      {suffix}
-    </span>
-  );
-}
+// ─── MAIN PAGE ───────────────────────────────────────────────────
 
 export default function Landing() {
   const { connect } = useWallet();
 
   return (
-    <div className="h-screen w-full bg-bg relative overflow-y-auto overflow-x-hidden snap-y snap-mandatory scroll-smooth">
-      {/* ─── Ambient background ──────────────────── */}
-      <div className="bg-ambient-glow fixed inset-0 pointer-events-none" />
-      <div className="fixed inset-0 pointer-events-none">
+    <div className="min-h-screen w-full bg-[#030303] text-white relative overflow-x-hidden scroll-smooth selection:bg-white/20">
+      
+      {/* ─── Ambient Aurora ──────────────────── */}
+      {/* Kept tidy and strictly in the background to avoid layout leaks */}
+      <div className="fixed inset-0 pointer-events-none z-0">
         <Background3D />
+        <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] bg-white opacity-[0.03] blur-[120px] rounded-full mix-blend-screen" />
+        <div className="absolute bottom-[-20%] left-[-10%] w-[600px] h-[600px] bg-[#f4791f] opacity-[0.03] blur-[150px] rounded-full mix-blend-screen" />
       </div>
 
-      {/* ─── Nav ──────────────────────────────────── */}
-      <nav className="fixed top-0 left-0 w-full z-50 flex items-center justify-between px-6 lg:px-8 py-4 backdrop-blur-md bg-bg/40 border-b border-white/5">
-        <div className="flex items-center gap-3">
-          <img src="/kova-logo.png" alt="Kova" className="w-9 h-9 rounded-xl shadow-lg shadow-accent/20" />
-          <span className="text-xl font-bold tracking-tight">Kova</span>
+      {/* ─── Floating Nav ──────────────────────────────────── */}
+      <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 flex items-center justify-between w-[90%] max-w-4xl px-3 py-3 rounded-2xl border border-white/[0.08] bg-[#030303]/60 backdrop-blur-xl shadow-2xl">
+        <div className="flex items-center gap-3 pl-2 cursor-pointer">
+          <img src="/kova-logo.png" alt="Kova" className="w-7 h-7 rounded-lg grayscale contrast-125" />
+          <span className="text-sm font-bold tracking-widest uppercase">Kova</span>
         </div>
 
-        <div className="hidden md:flex items-center gap-8 text-sm text-text-muted absolute left-1/2 -translate-x-1/2">
-          <a href="#features" className="hover:text-text transition-colors">Features</a>
-          <a href="/how-it-works" className="hover:text-text transition-colors">How It Works</a>
-          <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-text transition-colors">GitHub</a>
+        <div className="hidden md:flex items-center gap-8 text-xs font-mono text-white/50 uppercase tracking-widest">
+          <a href="#features" className="hover:text-white transition-colors">Platform</a>
+          <a href="#how-it-works" className="hover:text-white transition-colors">Protocol</a>
         </div>
 
         <button
           onClick={() => connect()}
-          className="px-5 py-2.5 bg-gradient-to-r from-accent to-accent-hover text-white text-sm font-medium rounded-xl transition-all duration-300 hover:shadow-[0_0_28px_rgba(99,102,241,0.4)] hover:scale-[1.03] animate-pulse-glow"
+          className="px-5 py-2.5 bg-white text-black text-xs font-bold uppercase tracking-wider rounded-xl transition-all duration-300 hover:bg-white/90"
         >
-          Connect Wallet
+          Connect
         </button>
       </nav>
 
-      {/* ─── Hero ─────────────────────────────────── */}
-      <section className="relative z-10 w-full min-h-screen flex flex-col items-center justify-center px-8 pt-20 pb-12 text-center snap-start shrink-0 overflow-hidden">
-        {/* Glow Effects */}
-        <div className="bg-glow-orange -top-[10%] -left-[10%] opacity-40" />
-        <div className="bg-glow-teal top-[20%] -right-[10%] opacity-30" />
-
-        <div className="max-w-5xl mx-auto w-full relative z-10">
+      {/* ─── Hero Section ─────────────────────────────────── */}
+      <section className="relative z-10 w-full pt-40 pb-24 px-6 flex flex-col items-center text-center">
+        <div className="max-w-4xl mx-auto w-full">
           <FadeInView delay={100}>
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-border/60 text-xs font-medium text-text-muted mb-8 bg-surface/30 backdrop-blur-md hover:border-border transition-colors cursor-default">
-              <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-              Built on Stacks · Secured by Bitcoin
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 text-xs font-mono uppercase tracking-widest text-white/60 bg-white/[0.02] backdrop-blur-md mb-8">
+              <Network className="w-3.5 h-3.5" />
+              Secured by Stacks & Bitcoin
             </div>
           </FadeInView>
 
           <FadeInView delay={200}>
-            <h1 className="text-5xl md:text-7xl font-bold leading-[1.1] tracking-tight text-white mt-4">
-              Trust your AI agent <br />
-              <span className="text-text-muted">with your Bitcoin.</span>
+            <h1 className="text-5xl md:text-7xl font-medium tracking-tight text-white/90 leading-[1.1]">
+              Unleash your AI. <br />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-white/40">
+                Control its spending.
+              </span>
             </h1>
-          </FadeInView>
-
-          <FadeInView delay={350}>
-            <p className="mt-8 text-lg md:text-xl text-text-muted max-w-2xl mx-auto leading-relaxed font-medium">
-              Kova is a smart wallet where Clarity contracts enforce spending
-              rules for autonomous AI agents. Set budgets, allowlist services,
-              and let your agent work.
+            <p className="mt-6 text-base md:text-lg text-white/50 max-w-2xl mx-auto font-light leading-relaxed">
+              Kova is a smart escrow protocol where Clarity contracts enforce hard rules for autonomous AI agents navigating X402 paywalls.
             </p>
           </FadeInView>
 
-          <FadeInView delay={500}>
-            <div className="mt-10 flex items-center justify-center gap-4">
+          <FadeInView delay={400}>
+            <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
               <button
                 onClick={() => connect()}
-                className="group px-8 py-3.5 bg-white text-bg font-semibold rounded-full transition-all duration-300 text-base flex items-center gap-2 hover:shadow-[0_0_36px_rgba(255,255,255,0.2)] hover:scale-[1.03]"
+                className="w-full sm:w-auto px-8 py-3.5 bg-white text-black font-bold uppercase tracking-wider text-xs rounded-xl transition-all duration-300 hover:scale-105"
               >
                 Launch App
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </button>
               <a
                 href="/how-it-works"
-                className="px-8 py-3.5 border border-border hover:border-accent/50 text-text-muted hover:text-text font-medium rounded-xl transition-all duration-300 text-base"
+                className="w-full sm:w-auto px-8 py-3.5 bg-white/[0.03] border border-white/10 text-white font-bold uppercase tracking-wider text-xs rounded-xl transition-all duration-300 hover:bg-white/[0.08]"
               >
-                How It Works
+                Read Docs
               </a>
             </div>
           </FadeInView>
 
-          {/* Live flow demo in terminal */}
-          <FadeInView delay={700}>
-            <div className="mt-12">
-              <LiveFlowDemo />
-            </div>
+          <FadeInView delay={600}>
+            <LiveFlowDemo />
           </FadeInView>
         </div>
       </section>
 
-      {/* ─── Security & Scale Stats ───────────────────── */}
-      <section className="relative z-10 w-full min-h-screen flex flex-col items-center justify-center px-8 py-16 snap-start shrink-0 overflow-hidden border-t border-border/30 bg-surface/10">
-        <div className="bg-glow-teal bottom-0 left-[20%] opacity-20" />
-
-        <div className="max-w-5xl mx-auto w-full relative z-10">
-          <FadeInView>
-            <div className="text-center mb-16">
-              <h2 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
-                Production-grade infrastructure
-              </h2>
-              <p className="mt-4 text-text-muted max-w-xl mx-auto">
-                Immutable Clarity contracts that settle on Bitcoin. Complete peace of mind when agents spend your money.
-              </p>
-            </div>
-          </FadeInView>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[
-              {
-                value: 5,
-                suffix: "",
-                label: "Security Checks per Tx",
-                desc: "Active wallet, allowlist, identity, daily limit, and per-call cap verifications.",
-                icon: <Shield className="w-8 h-8 text-accent/80" />
-              },
-              {
-                value: 57,
-                suffix: "",
-                label: "Automated Contract Tests",
-                desc: "Rigorous test coverage preventing drains and access control bypasses.",
-                icon: <FileText className="w-8 h-8 text-accent/80" />
-              },
-              {
-                value: 2,
-                suffix: "%",
-                label: "Immutable Protocol Fee",
-                desc: "Transparent on-chain revenue model built seamlessly into the HTTP 402 flow.",
-                icon: <Package className="w-8 h-8 text-accent/80" />
-              },
-            ].map((stat, i) => (
-              <FadeInView key={stat.label} delay={100 + (i * 150)}>
-                <div
-                  className="group relative p-8 rounded-2xl bg-surface/30 border border-border/50 hover:border-accent/40 transition-all hover:bg-surface/50 hover:-translate-y-1 h-full flex flex-col items-center text-center overflow-hidden"
-                >
-                  {/* Subtle glow */}
-                  <div className="absolute inset-0 bg-gradient-to-b from-accent/0 to-transparent group-hover:from-accent/5 transition-colors duration-500" />
-
-                  <div className="flex justify-center mb-6 transition-transform group-hover:scale-110 group-hover:text-amber-500 duration-300 relative z-10">
-                    <div className="w-16 h-16 rounded-2xl bg-surface-2 border border-border/50 flex items-center justify-center shadow-lg group-hover:shadow-accent/20 group-hover:border-accent/40 transition-all">
-                      {stat.icon}
-                    </div>
-                  </div>
-
-                  <div className="relative z-10">
-                    <p className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-br from-white to-white/60 drop-shadow-sm mb-2">
-                      <AnimatedNumber target={stat.value} suffix={stat.suffix} />
-                    </p>
-                    <h3 className="text-lg font-bold text-white mb-3 tracking-tight">{stat.label}</h3>
-                    <p className="text-sm text-text-muted leading-relaxed">{stat.desc}</p>
-                  </div>
-                </div>
-              </FadeInView>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ─── Features ─────────────────────────────── */}
-      <section id="features" className="relative z-10 w-full min-h-screen flex flex-col items-center justify-center px-8 py-20 snap-start shrink-0 overflow-hidden">
-        {/* Glow Effects */}
-        <div className="bg-glow-orange top-1/2 left-[50%] -translate-x-1/2 -translate-y-1/2 opacity-20 w-[800px] h-[800px]" />
-
-        <div className="max-w-6xl mx-auto w-full relative z-10">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
-              Built for trust, designed for autonomy
+      {/* ─── Bento Box Features ─────────────────────────────────── */}
+      <section id="features" className="relative z-10 w-full px-6 py-24 border-t border-white/[0.05] bg-[#030303]/50">
+        <div className="max-w-6xl mx-auto w-full">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-medium text-white tracking-tight">
+              Designed for autonomy. Built for trust.
             </h2>
-            <p className="mt-4 text-text-muted max-w-lg mx-auto">
-              Everything your AI agent needs to operate safely within your rules.
+            <p className="mt-4 text-white/50 text-sm font-light max-w-xl mx-auto">
+              Everything your agent needs to operate smoothly, entirely gated by immutable rules.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4 md:gap-6">
             {features.map((f, i) => (
-              <FadeInView key={f.title} delay={i * 100}>
-                <div
-                  className={`group relative p-8 rounded-2xl bg-surface/40 border border-border/50 hover:border-accent/40 shadow-lg transition-all duration-300 overflow-hidden h-full`}
-                >
-                  {/* Subtle background glow on hover */}
-                  <div className="absolute inset-0 bg-gradient-to-br from-accent/0 to-accent/0 group-hover:from-accent/10 transition-all duration-300" />
-
-                  {/* Smaller backdrop icon for density */}
-                  <div className="absolute -bottom-4 -right-4 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity duration-300 pointer-events-none transform group-hover:scale-110">
-                    <f.icon className="w-32 h-32" />
+              <FadeInView key={f.title} delay={i * 100} className={f.colSpan}>
+                <div className="p-8 md:p-10 rounded-3xl bg-white/[0.02] border border-white/[0.05] backdrop-blur-sm hover:bg-white/[0.04] hover:border-white/[0.1] transition-all duration-500 h-full flex flex-col">
+                  <div className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-white/[0.05] flex items-center justify-center text-white/80 mb-8">
+                    <f.icon className="w-5 h-5" />
                   </div>
-
-                  <div className="relative z-10 flex flex-col h-full">
-                    <div className="w-12 h-12 rounded-xl bg-surface border border-border flex items-center justify-center mb-6 shadow-sm group-hover:border-accent/50 group-hover:bg-accent/10 transition-colors">
-                      <f.icon className="w-5 h-5 text-accent" />
-                    </div>
-                    <h3 className="text-xl font-bold mb-3 text-white tracking-tight">{f.title}</h3>
-                    <p className="text-sm text-text-muted leading-relaxed max-w-sm mt-auto">{f.desc}</p>
-                  </div>
+                  <h3 className="text-xl font-medium mb-3 text-white/90">{f.title}</h3>
+                  <p className="text-sm text-white/50 font-light leading-relaxed">{f.desc}</p>
                 </div>
               </FadeInView>
             ))}
@@ -426,96 +301,68 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ─── How it works ─────────────────────────── */}
-      <section id="how-it-works" className="relative z-10 w-full min-h-screen flex flex-col items-center justify-center px-8 py-20 snap-start shrink-0 overflow-hidden border-t border-border/30 bg-surface/10">
-        <div className="bg-glow-teal top-10 -left-[10%] opacity-20" />
-        <div className="bg-glow-orange bottom-10 -right-[10%] opacity-20" />
-
-        <div className="max-w-5xl mx-auto w-full relative z-10">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
-              How Kova works
+      {/* ─── How it Works (Horizontal Timeline) ──────────────────── */}
+      <section id="how-it-works" className="relative z-10 w-full px-6 py-24">
+        <div className="max-w-6xl mx-auto w-full">
+          <div className="flex flex-col items-center mb-16">
+            <div className="px-4 py-1.5 rounded-full border border-white/10 text-xs font-mono uppercase tracking-widest text-white/60 bg-white/[0.02] mb-6">
+              Protocol Flow
+            </div>
+            <h2 className="text-3xl md:text-4xl font-medium text-white tracking-tight text-center">
+              Three steps to automation
             </h2>
-            <p className="mt-4 text-text-muted">
-              Three simple steps to autonomous AI spending.
-            </p>
           </div>
 
-          <div className="max-w-3xl mx-auto space-y-8 relative">
-            {/* Vertical connecting line */}
-            <div className="hidden md:block absolute top-[40px] bottom-[40px] left-[27px] w-px bg-gradient-to-b from-transparent via-accent/30 to-transparent z-0" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative">
+            {/* Desktop connecting line */}
+            <div className="hidden md:block absolute top-[44px] left-[10%] right-[10%] h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent z-0" />
 
             {steps.map((s, i) => (
               <FadeInView key={s.num} delay={i * 150}>
-                <div
-                  className="group relative z-10 flex flex-col md:flex-row gap-6 md:gap-10 items-start p-6 rounded-2xl bg-surface/40 border border-border/50 hover:bg-surface/60 hover:border-accent/40 hover:-translate-y-1 transition-all duration-300 shadow-sm hover:shadow-lg"
-                >
-                  <div className="shrink-0 relative">
-                    <div className="w-14 h-14 rounded-2xl bg-surface-2 border border-border flex items-center justify-center shadow-md group-hover:border-accent group-hover:text-amber-400 group-hover:bg-accent/10 group-hover:shadow-[0_0_20px_rgba(244,121,31,0.2)] transition-all duration-300 rotate-3 group-hover:rotate-0">
-                      <span className="font-bold text-lg">{s.num}</span>
-                    </div>
+                <div className="relative z-10 flex flex-col items-center text-center">
+                  <div className="w-24 h-24 rounded-full bg-[#030303] border border-white/[0.08] flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(255,255,255,0.02)] relative">
+                    {/* Inner glowing ring */}
+                    <div className="absolute inset-2 rounded-full border border-white/10 bg-white/[0.02]" />
+                    <span className="text-lg font-mono text-white/80 z-10">{s.num}</span>
                   </div>
-
-                  <div className="flex flex-col flex-1 pt-2">
-                    <div className="flex items-center gap-3 mb-2">
-                      <s.icon className={`w-5 h-5 text-accent`} />
-                      <h3 className="font-bold text-xl text-white tracking-tight">{s.title}</h3>
-                    </div>
-                    <p className="text-text-muted leading-relaxed text-sm md:text-base">{s.desc}</p>
-                  </div>
+                  <h3 className="font-medium text-xl text-white/90 mb-3">{s.title}</h3>
+                  <p className="text-sm text-white/50 font-light max-w-[250px] leading-relaxed">{s.desc}</p>
                 </div>
               </FadeInView>
             ))}
           </div>
-
-          {/* Learn more link */}
-          <div className="text-center mt-8">
-            <a
-              href="/how-it-works"
-              className="inline-flex items-center gap-2 text-sm text-accent hover:text-accent-hover transition-colors"
-            >
-              See detailed breakdown
-              <ArrowRight className="w-3.5 h-3.5" />
-            </a>
-          </div>
         </div>
       </section>
-
-      {/* ─── CTA & Footer ─────────────────────────── */}
-      <section className="relative z-10 w-full min-h-screen flex flex-col items-center justify-center px-8 pt-20 pb-0 snap-start shrink-0 overflow-hidden">
-        {/* Intense Central Glow */}
-        <div className="bg-glow-orange top-1/2 left-[50%] -translate-x-1/2 -translate-y-1/2 opacity-30 w-[1000px] h-[1000px]" />
-
-        <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col justify-center relative z-10">
-          <FadeInView>
-            <div className="relative rounded-[2rem] overflow-hidden bg-surface/20 border border-border/50 p-12 text-center shadow-lg">
-              <div className="relative z-10">
-                <h2 className="text-3xl md:text-4xl font-bold mb-4 text-white tracking-tight">
+      {/* ─── CTA ─────────────────────────── */}
+      <section className="relative z-10 w-full px-6 py-24 border-t border-white/[0.05]">
+          <div className="max-w-2xl mx-auto text-center">
+              <h2 className="text-3xl md:text-4xl font-medium text-white mb-4">
                   Ready to let your agent work?
-                </h2>
-                <p className="text-text-muted max-w-md mx-auto mb-8">
-                  Deploy your smart wallet on Stacks testnet in minutes. No mainnet fees required.
-                </p>
-                <button
+              </h2>
+              <p className="text-white/50 text-sm mb-8 font-light">
+                  Deploy on Stacks testnet in minutes. No mainnet fees.
+              </p>
+              <button
                   onClick={() => connect()}
-                  className="group px-10 py-4 bg-white text-bg font-semibold rounded-full transition-all duration-300 text-base flex items-center gap-2 mx-auto hover:scale-[1.03] hover:shadow-[0_0_20px_rgba(255,255,255,0.2)]"
-                >
+                  className="px-10 py-4 bg-white text-black font-bold uppercase tracking-wider text-xs rounded-xl hover:scale-105 transition-all duration-300"
+              >
                   Get Started
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </button>
-              </div>
-            </div>
-          </FadeInView>
-        </div>
-
-        {/* ─── Footer ───────────────────────────────── */}
-        <footer className="w-full relative z-10 border-t border-border/50 py-8 text-center mt-auto">
-          <div className="flex items-center justify-center gap-2 text-sm text-text-muted">
-            <Shield className="w-4 h-4 text-accent" />
-            <span>Kova — Built for Buidl Battle on Stacks</span>
+              </button>
           </div>
-        </footer>
       </section>
+
+      {/* ─── Footer ─────────────────────────── */}
+      <footer className="w-full relative z-10 border-t border-white/[0.05] py-10 px-6 flex flex-col items-center justify-center text-center bg-[#030303]">
+        <img src="/kova-logo.png" alt="Kova Logo" className="w-8 h-8 rounded-lg grayscale opacity-50 mb-6" />
+        <div className="flex gap-8 text-xs font-mono uppercase tracking-widest text-white/40 mb-6">
+          <a href="#" className="hover:text-white transition-colors">Platform</a>
+          <a href="/how-it-works" className="hover:text-white transition-colors">Documentation</a>
+          <a href="https://github.com/KamiliaNHayati/kova.git" className="hover:text-white transition-colors">GitHub</a>
+        </div>
+        <div className="text-[10px] text-white/30 uppercase tracking-widest">
+          © {new Date().getFullYear()} Kova Protocol — Built on Stacks · x402 Protocol
+        </div>
+      </footer>
     </div>
   );
 }

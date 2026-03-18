@@ -10,8 +10,8 @@ path = 'contracts/agent-wallet-v7.clar'
 clarity_version = 4
 epoch = '3.3'
 
-[contracts.service-registry-v4]
-path = 'contracts/service-registry-v4.clar'
+[contracts.service-registry-v5]
+path = 'contracts/service-registry-v5.clar'
 clarity_version = 4
 epoch = '3.3'
 [repl.analysis]

@@ -1,0 +1,12 @@
+[
+  {
+    "name": "weather-feed",
+    "description": "Test service reusing price feed endpoint",
+    "url": "http://localhost:3402/api/price-feed",
+    "priceSTX": 2.5e-7,
+    "price": 0,
+    "address": "ST1T38B636V6BFAHTBMHZE3H4J98M3JZXT9SPY4F7",
+    "registeredAt": "2026-03-18T07:43:22.370Z",
+    "active": true
+  }
+]

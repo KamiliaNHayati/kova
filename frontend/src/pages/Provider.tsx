@@ -26,6 +26,7 @@ interface ServiceInfo {
     url: string;
     pricePerCall: number;
     active: boolean;
+    paymentAddress?: string; 
 }
 
 export default function Provider() {
@@ -34,6 +35,7 @@ export default function Provider() {
     const [loading, setLoading] = useState(true);
     const [showRegister, setShowRegister] = useState(false);
     const [copiedSnippet, setCopiedSnippet] = useState(false);
+    const [paymentAddress, setPaymentAddress] = useState("");
 
     // Test endpoint state
     const [testResult, setTestResult] = useState<"idle" | "testing" | "pass" | "fail">("idle");
@@ -64,7 +66,8 @@ export default function Provider() {
                         description: v.description?.value || "",
                         url: v.url?.value || "",
                         pricePerCall: parseInt(v["price-per-call"]?.value || "0"),
-                        active: v.active?.value === true, // ✅ explicit boolean check
+                        active: v.active?.value === true,
+                        paymentAddress: v["payment-address"]?.value || address!
                     });
                 }
             }
@@ -105,7 +108,8 @@ export default function Provider() {
     async function handleRegister() {
         if (!name || !url || !price) return;
         
-        // Register in server.js for immediate discovery
+        const payAddr = paymentAddress || address!;
+
         try {
             await fetch("http://localhost:3402/api/register-service", {
                 method: "POST",
@@ -114,18 +118,18 @@ export default function Provider() {
                     name: name.toLowerCase().replace(/\s+/g, "-"),
                     description,
                     url,
-                    priceSTX: (parseInt(price) / 1_000_000).toString(),
-                    address: address, // provider's wallet address
+                    priceSTX: (parseFloat(price) / 1_000_000).toFixed(6),
+                    address: payAddr, // ✅ use custom payment address
                 })
             });
         } catch (e) {
             console.error("Failed to register in server:", e);
         }
 
-        // Also register on-chain
-        registerService(name, description, url, parseInt(price), () => {
+        registerService(name, description, url, parseInt(price), payAddr, () => {
             setShowRegister(false);
             setName(""); setDescription(""); setUrl(""); setPrice("");
+            setPaymentAddress(""); // ✅ reset
             setTestResult("idle"); setTestMessage("");
             setTimeout(loadServices, 3000);
         });
@@ -272,6 +276,21 @@ app.get('/api/your-endpoint',
                                 className="w-full px-4 py-3 bg-black/30 border border-border/50 rounded-xl text-white placeholder-text-muted/50 focus:border-accent focus:outline-none"
                                 maxLength={100}
                             />
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm text-text-muted mb-1">
+                                Payment Address <span className="text-text-muted/50">(optional — defaults to your address)</span>
+                            </label>
+                            <input
+                                type="text"
+                                value={paymentAddress}
+                                onChange={(e) => setPaymentAddress(e.target.value)}
+                                placeholder={address || "ST..."}
+                                className="w-full px-4 py-3 bg-black/30 border border-border/50 rounded-xl text-white placeholder-text-muted/50 focus:border-accent focus:outline-none font-mono text-sm"
+                            />
+                            <p className="text-[10px] text-text-muted mt-1">
+                                STX payments will be sent to this address
+                            </p>
                         </div>
                     </div>
                     {/* Test Result */}
