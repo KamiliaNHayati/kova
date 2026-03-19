@@ -49,11 +49,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           <div className="p-6 border-b border-white/[0.05]">
             <div className="flex items-center gap-3">
               <div className="relative">
-                <img 
-                  src="/kova-logo.png" 
-                  alt="Kova" 
-                  className="w-10 h-10 rounded-xl grayscale contrast-125 brightness-150 shadow-lg border border-white/10" 
-                />
+                <img src="/kova-logo.svg" alt="Kova Logo" className="w-8 h-8 rounded-lg" />
                 <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full ring-2 ring-[#0A0A0A] border border-emerald-500/50 animate-pulse" />
               </div>
               <div>

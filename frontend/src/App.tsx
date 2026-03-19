@@ -12,11 +12,21 @@ import Settings from "./pages/Settings";
 import Provider from "./pages/Provider";
 import Pipelines from "./pages/Pipelines";
 
-// Page transition animations (Smooth fade and scale up)
+// ─── Premium Page Transitions ──────────────────────────────────────
+// Swapped the bouncy scale effect for a sleek, fast vertical fade
+// to match the high-end dark glassmorphic aesthetic.
 const pageVariants: any = {
-  initial: { opacity: 0, scale: 0.97, y: 20 },
-  animate: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.6 } },
-  exit: { opacity: 0, scale: 1.02, y: -20, transition: { duration: 0.4 } },
+  initial: { opacity: 0, y: 15 },
+  animate: { 
+    opacity: 1, 
+    y: 0, 
+    transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } // Smooth cinematic ease-out
+  },
+  exit: { 
+    opacity: 0, 
+    y: -15, 
+    transition: { duration: 0.3, ease: [0.22, 1, 0.36, 1] } 
+  },
 };
 
 function PageWrapper({ children }: { children: React.ReactNode }) {

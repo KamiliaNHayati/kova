@@ -781,67 +781,117 @@ function startApiServer() {
             if (!owner) return res.status(400).json({ error: "owner missing" });
 
             let requestedAgents = [];
-            if (!agent || agent === "ALL") {
-                // fallback to derivedAgents if no specific agents provided
+            if (!agent || agent === "ALL" || agent === "") {
                 requestedAgents = derivedAgents.map(a => a.address);
                 if (agentAddress && !requestedAgents.includes(agentAddress)) {
                     requestedAgents.push(agentAddress);
                 }
             } else if (agent.includes(",")) {
-                // comma-separated list from frontend
                 requestedAgents = agent.split(",").map(a => a.trim()).filter(Boolean);
             } else {
                 requestedAgents = [agent];
             }
 
-            const allRecords = [];
-            let totalCount = 0;
+            // Helper: retry a fetch up to 3 times
+            async function fetchWithRetry(fn, retries = 3) {
+                for (let i = 0; i < retries; i++) {
+                    try {
+                        return await fn();
+                    } catch (e) {
+                        if (i === retries - 1) throw e;
+                        // Parse wait time from 429 message
+                        const match = e.message?.match(/try again in (\d+) seconds/i);
+                        const waitMs = match ? (parseInt(match[1]) + 1) * 1000 : 2000 * (i + 1);
+                        console.log(`Rate limited, waiting ${waitMs/1000}s...`);
+                        await new Promise(r => setTimeout(r, waitMs));
+                    }
+                }
+            }
 
+            // Step 1: get all nonces first (total count source of truth)
+            const agentNonces = [];
             for (const addr of requestedAgents) {
                 try {
-                    const nonceResult = await fetchCallReadOnlyFunction({
+                    const nonceResult = await fetchWithRetry(() => fetchCallReadOnlyFunction({
                         contractAddress: CONTRACT,
                         contractName: CONTRACT_NAME,
                         functionName: "get-spend-nonce",
                         functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(addr)],
                         network: STACKS_TESTNET,
                         senderAddress: operatorAddress,
-                    });
-                    const nonceJson = cvToJSON(nonceResult);
-                    const nonceInt = parseInt(nonceJson?.value?.value || nonceJson?.value || 0);
+                    }));
+                    const nonceInt = parseInt(cvToJSON(nonceResult)?.value?.value || cvToJSON(nonceResult)?.value || 0);
+                    agentNonces.push({ addr, nonce: nonceInt });
+                } catch (e) {
+                    console.error(`Failed to get nonce for ${addr}:`, e.message);
+                }
+            }
 
-                    totalCount += nonceInt;
+            // Total is sum of all nonces (each nonce = number of records)
+            const totalCount = agentNonces.reduce((sum, a) => sum + a.nonce, 0);
 
-                    const start = Math.max(0, nonceInt - (parseInt(offset) + parseInt(limit)));
-                    for (let i = nonceInt - 1; i >= start; i--) {
-                        try {
-                            const recResult = await fetchCallReadOnlyFunction({
-                                contractAddress: CONTRACT,
-                                contractName: CONTRACT_NAME,
-                                functionName: "get-spend-record",
-                                functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(addr), uintCV(i)],
-                                network: STACKS_TESTNET,
-                                senderAddress: operatorAddress,
-                            });
-                            const rJson = cvToJSON(recResult);
+            // Step 2: build index of all (agent, nonce) pairs sorted by... 
+            // we don't know block yet, so fetch ALL then sort
+            // For large datasets, fetch in parallel batches
+            const allRecords = [];
+
+            for (let agentIdx = 0; agentIdx < agentNonces.length; agentIdx++) {
+                const { addr, nonce: nonceInt } = agentNonces[agentIdx];
+                
+                const indices = Array.from({ length: nonceInt }, (_, i) => nonceInt - 1 - i);
+                const BATCH_SIZE = 2;
+                
+                for (let b = 0; b < indices.length; b += BATCH_SIZE) {
+                    const batch = indices.slice(b, b + BATCH_SIZE);
+                    const results = await Promise.allSettled(
+                        batch.map(i => fetchWithRetry(() => fetchCallReadOnlyFunction({
+                            contractAddress: CONTRACT,
+                            contractName: CONTRACT_NAME,
+                            functionName: "get-spend-record",
+                            functionArgs: [standardPrincipalCV(owner), standardPrincipalCV(addr), uintCV(i)],
+                            network: STACKS_TESTNET,
+                            senderAddress: operatorAddress,
+                        })).then(r => ({ i, r }))
+                    ));
+
+                    for (const result of results) {
+                        if (result.status === "fulfilled") {
+                            const { i, r } = result.value;
+                            const rJson = cvToJSON(r);
                             if (rJson?.value?.value) {
                                 const v = rJson.value.value;
                                 allRecords.push({
                                     nonce: i,
-                                    agent: addr,            // use the loop variable
+                                    agent: addr,
                                     service: v.service.value,
                                     amount: parseInt(v.amount.value),
-                                    fee: parseInt(v.fee.value),  // also missing — contract stores this
+                                    fee: parseInt(v.fee?.value || 0),
                                     block: parseInt(v.block.value),
                                 });
                             }
-                        } catch (e) { }
+                        } else {
+                            console.warn(`Failed record fetch:`, result.reason?.message);
+                        }
                     }
-                } catch (e) { }
+
+                    // Delay between batches
+                    if (b + BATCH_SIZE < indices.length) {
+                        await new Promise(r => setTimeout(r, 300));
+                    }
+                }
+
+                // Delay between agents
+                if (agentIdx < agentNonces.length - 1) {
+                    await new Promise(r => setTimeout(r, 500));
+                }
             }
-            allRecords.sort((a,b) => b.block - a.block || b.nonce - a.nonce);
-            const slicedRecords = allRecords.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
-            res.json({ totalCount: allRecords.length, records: slicedRecords }); // use allRecords.length not totalCount
+
+            // Sort by block desc, then agent, then nonce desc
+            allRecords.sort((a, b) => b.block - a.block || a.agent.localeCompare(b.agent) || b.nonce - a.nonce);
+
+            const sliced = allRecords.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+
+            res.json({ totalCount, records: sliced });
         } catch (err) {
             res.status(500).json({ error: err.message });
         }

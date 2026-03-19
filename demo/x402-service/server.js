@@ -168,12 +168,13 @@ app.get("/paid-status", async (req, res) => {
 });
 
 // Register a new service
+// Register a new service
 app.post("/api/register-service", (req, res) => {
     const { name, description, url, priceSTX, address } = req.body;
+    console.log("📥 Register request:", req.body);
     if (!name || !url || !priceSTX || !address) {
         return res.status(400).json({ error: "Missing required fields" });
     }
-    // For hackathon: allow duplicate URLs, only block exact same name
     const existing = dynamicServices.find(s => s.name === name);
     if (existing) {
         return res.status(409).json({ error: "Service name already taken" });
@@ -182,8 +183,8 @@ app.post("/api/register-service", (req, res) => {
         name: name.toLowerCase().replace(/\s+/g, "-"),
         description: description || "",
         url,
-        priceSTX: parseFloat(priceSTX) / 1_000_000,
-        price: parseInt(priceSTX),
+        priceSTX: parseFloat(priceSTX).toFixed(6),
+        price: Math.round(parseFloat(priceSTX) * 1_000_000),
         address,
         registeredAt: new Date().toISOString(),
         active: true,
@@ -246,6 +247,18 @@ app.use("/api/ext/:serviceName", async (req, res) => {
     } catch (err) {
         res.status(502).json({ error: "Service unavailable" });
     }
+});
+
+app.delete("/api/services/:name", (req, res) => {
+    const name = req.params.name.toLowerCase();
+    const index = dynamicServices.findIndex(s => s.name === name);
+    if (index === -1) {
+        return res.status(404).json({ error: "Service not found" });
+    }
+    dynamicServices.splice(index, 1);
+    saveRegistry();
+    console.log(`🗑️ Service deleted from registry: ${name}`);
+    res.json({ success: true });
 });
 
 // ─── Start ───────────────────────────────────────────

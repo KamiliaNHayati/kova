@@ -83,21 +83,25 @@ const safetyFeatures = [
     icon: Lock,
     title: "Escrow Design",
     desc: "User deposits STX into the contract. The agent can only spend through agent-pay — atomic transfer with built-in rule checks. No private key exposure.",
+    iconStyle: "text-cyan-400 bg-cyan-500/[0.05] border-cyan-400/20",
   },
   {
     icon: Shield,
     title: "Kill Switch",
     desc: "Instantly freeze all agent activity with one click. The agent can't spend anything while the wallet is deactivated.",
+    iconStyle: "text-red-400 bg-red-500/[0.05] border-red-400/20",
   },
   {
     icon: Eye,
     title: "On-Chain Audit Trail",
     desc: "Every payment is logged with a nonce, service address, amount, and block height. Fully transparent and immutable.",
+    iconStyle: "text-sky-400 bg-sky-500/[0.05] border-sky-400/20",
   },
   {
     icon: Zap,
     title: "Daily Reset",
     desc: "Spending limits reset every ~144 blocks (~24 hours). Even a compromised agent can only spend up to your daily cap.",
+    iconStyle: "text-fuchsia-400 bg-fuchsia-500/[0.05] border-fuchsia-400/20",
   },
 ];
 
@@ -140,12 +144,12 @@ export default function HowItWorks() {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen w-full bg-[#030303] text-white relative overflow-x-hidden scroll-smooth selection:bg-white/20 font-sans">
+    <div className="min-h-screen w-full bg-[#030303] text-white relative overflow-x-hidden scroll-smooth selection:bg-cyan-400/30 font-sans">
       
-      {/* ─── Ambient Aurora Backgrounds (BRIGHTENED & COLORIZED) ─── */}
+      {/* ─── Ambient Aurora Backgrounds (Sky Blue & Indigo) ─── */}
       <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-emerald-500 opacity-[0.06] blur-[120px] rounded-full mix-blend-screen" />
-        <div className="absolute bottom-[20%] right-[-10%] w-[600px] h-[600px] bg-indigo-500 opacity-[0.06] blur-[150px] rounded-full mix-blend-screen" />
+        <div className="absolute top-[10%] left-[-10%] w-[500px] h-[500px] bg-sky-500 opacity-[0.04] blur-[120px] rounded-full mix-blend-screen" />
+        <div className="absolute bottom-[20%] right-[-10%] w-[600px] h-[600px] bg-indigo-500 opacity-[0.04] blur-[150px] rounded-full mix-blend-screen" />
       </div>
 
       {/* ─── Header ──────────────────────────────────────── */}
@@ -160,7 +164,7 @@ export default function HowItWorks() {
 
         <FadeInView>
           <div className="flex items-center gap-3 mb-6">
-            <img src="/kova-logo.png" alt="Kova" className="w-8 h-8 rounded-lg grayscale contrast-125 brightness-150" />
+            <img src="/kova-logo.png" alt="Kova" className="w-8 h-8 rounded-lg" />
             <span className="text-[11px] font-mono text-white/70 tracking-widest uppercase">Protocol Documentation</span>
           </div>
 
@@ -174,35 +178,35 @@ export default function HowItWorks() {
         </FadeInView>
       </header>
 
-      {/* ─── Flow Steps (BRIGHTENED CARDS) ───────────────── */}
+      {/* ─── Flow Steps (CYAN ACCENTS) ───────────────── */}
       <section className="relative z-10 max-w-4xl mx-auto px-6 py-12">
         <div className="space-y-6">
           {flowSteps.map((step, i) => (
             <FadeInView key={step.num} delay={i * 100}>
-              <div className="group relative flex flex-col md:flex-row gap-6 md:gap-8 p-8 md:p-10 rounded-3xl bg-white/[0.04] border border-white/10 hover:bg-white/[0.06] hover:border-white/20 transition-all duration-500 backdrop-blur-md shadow-lg">
+              <div className="group relative flex flex-col md:flex-row gap-6 md:gap-8 p-8 md:p-10 rounded-3xl bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.04] hover:border-cyan-400/20 transition-all duration-500 backdrop-blur-md shadow-lg">
                 
                 {/* Step number & Icon */}
                 <div className="flex-shrink-0 flex flex-row md:flex-col items-center gap-4 md:gap-0">
-                  <div className="w-16 h-16 rounded-2xl bg-white/[0.08] border border-white/10 flex items-center justify-center text-white group-hover:scale-105 group-hover:shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all duration-500">
+                  <div className="w-16 h-16 rounded-2xl bg-cyan-500/[0.05] border border-cyan-400/20 flex items-center justify-center text-cyan-400 group-hover:scale-105 group-hover:shadow-[0_0_20px_rgba(34,211,238,0.2)] transition-all duration-500">
                     <span className="font-mono text-xl font-medium">{step.num}</span>
                   </div>
                   {i < flowSteps.length - 1 && (
-                    <div className="hidden md:block w-[1px] h-full min-h-[40px] bg-gradient-to-b from-white/20 to-transparent my-4" />
+                    <div className="hidden md:block w-[1px] h-full min-h-[40px] bg-gradient-to-b from-cyan-400/20 to-transparent my-4" />
                   )}
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 min-w-0 pt-1">
                   <div className="flex items-center gap-3 mb-3">
-                    <step.icon className="w-5 h-5 text-white/80" />
+                    <step.icon className="w-5 h-5 text-white/80 group-hover:text-cyan-400 transition-colors" />
                     <h3 className="font-medium text-xl text-white tracking-tight">{step.title}</h3>
                   </div>
                   <p className="text-white/70 mb-6 font-light leading-relaxed">{step.desc}</p>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {step.details.map((detail, j) => (
-                      <div key={j} className="flex items-start gap-3 p-3.5 rounded-xl bg-white/[0.03] border border-white/[0.05]">
-                        <span className="text-white/40 text-xs mt-0.5 font-mono font-bold">›</span>
+                      <div key={j} className="flex items-start gap-3 p-3.5 rounded-xl bg-white/[0.01] border border-white/[0.03] group-hover:border-white/[0.08] transition-colors">
+                        <span className="text-cyan-400/60 text-xs mt-0.5 font-mono font-bold">›</span>
                         <span className="text-sm text-white/80 font-light leading-relaxed">{detail}</span>
                       </div>
                     ))}
@@ -214,7 +218,7 @@ export default function HowItWorks() {
         </div>
       </section>
 
-      {/* ─── X402 Protocol Diagram (SYNTAX HIGHLIGHTED) ─── */}
+      {/* ─── X402 Protocol Diagram (CYBERPUNK HIGHLIGHTS) ─── */}
       <section className="relative z-10 max-w-4xl mx-auto px-6 py-20">
         <FadeInView>
           <div className="mb-10">
@@ -222,8 +226,8 @@ export default function HowItWorks() {
             <p className="text-white/70 font-light">What happens under the hood when your agent pays for a service.</p>
           </div>
 
-          <div className="p-1 rounded-3xl bg-gradient-to-b from-white/10 to-transparent shadow-2xl">
-            <div className="p-6 md:p-10 rounded-[1.4rem] bg-[#0A0A0A] border border-white/10 overflow-x-auto">
+          <div className="p-1 rounded-3xl bg-gradient-to-b from-white/[0.05] to-transparent shadow-2xl">
+            <div className="p-6 md:p-10 rounded-[1.4rem] bg-[#0A0A0A] border border-white/10 overflow-x-auto shadow-inner">
               
               {/* Fake Window Controls */}
               <div className="flex gap-2 mb-8">
@@ -236,8 +240,8 @@ export default function HowItWorks() {
                 
                 {/* Step 1 */}
                 <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 text-white/50">
-                  <span className="text-sky-400 w-24 shrink-0 font-bold">Agent</span>
-                  <span className="hidden md:inline text-white/40">── <span className="text-purple-400">GET</span> /.well-known/x402 ──→</span>
+                  <span className="text-cyan-400 w-24 shrink-0 font-bold">Agent</span>
+                  <span className="hidden md:inline text-white/40">── <span className="text-fuchsia-400">GET</span> /.well-known/x402 ──→</span>
                   <span className="md:hidden text-white/40">→ GET /.well-known/x402 →</span>
                   <span className="text-amber-400 font-medium">X402 Service</span>
                 </div>
@@ -274,13 +278,13 @@ export default function HowItWorks() {
 
                 {/* Step 4 */}
                 <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 text-white/50">
-                  <span className="text-sky-400 w-24 shrink-0 font-bold">Agent</span>
-                  <span className="hidden md:inline text-white/40">── <span className="text-purple-400">GET</span> /api/data + X-PAYMENT header ──→</span>
+                  <span className="text-cyan-400 w-24 shrink-0 font-bold">Agent</span>
+                  <span className="hidden md:inline text-white/40">── <span className="text-fuchsia-400">GET</span> /api/data + X-PAYMENT header ──→</span>
                   <span className="md:hidden text-white/40">→ GET /api/data →</span>
                   <span className="text-amber-400 font-medium">X402 Service</span>
                 </div>
                 <p className="pl-4 md:pl-[120px] text-white/80">
-                  <span className="text-emerald-400 font-bold">↩ 200 OK</span> + data payload <span className="text-white/40 italic">(service verifies on-chain)</span>
+                  <span className="text-emerald-400 font-bold drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">↩ 200 OK</span> + data payload <span className="text-white/40 italic">(service verifies on-chain)</span>
                 </p>
 
               </div>
@@ -301,8 +305,8 @@ export default function HowItWorks() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {safetyFeatures.map((f, i) => (
                 <FadeInView key={f.title} delay={i * 100}>
-                  <div className="p-8 rounded-3xl bg-white/[0.04] border border-white/10 hover:border-white/20 transition-all duration-300 h-full shadow-lg">
-                    <div className="w-12 h-12 rounded-xl bg-white/[0.08] flex items-center justify-center text-white mb-6 border border-white/10 shadow-inner">
+                  <div className="p-8 rounded-3xl bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.04] hover:border-white/10 transition-all duration-300 h-full shadow-lg">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-6 border ${f.iconStyle}`}>
                       <f.icon className="w-5 h-5" />
                     </div>
                     <h4 className="font-medium text-lg mb-2 text-white tracking-tight">{f.title}</h4>
@@ -326,7 +330,7 @@ export default function HowItWorks() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             
             {/* Without Kova */}
-            <div className="p-8 rounded-3xl bg-red-500/[0.04] border border-red-500/20 shadow-[0_0_30px_rgba(239,68,68,0.05)]">
+            <div className="p-8 rounded-3xl bg-red-500/[0.02] border border-red-500/10 hover:border-red-500/20 transition-all shadow-[0_0_30px_rgba(239,68,68,0.02)]">
               <h4 className="flex items-center gap-3 font-medium text-red-400 mb-6 text-lg tracking-tight">
                 <XCircle className="w-5 h-5" /> Legacy Approach
               </h4>
@@ -340,16 +344,16 @@ export default function HowItWorks() {
             </div>
 
             {/* With Kova */}
-            <div className="p-8 rounded-3xl bg-emerald-500/[0.05] border border-emerald-500/30 shadow-[0_0_30px_rgba(16,185,129,0.05)]">
-              <h4 className="flex items-center gap-3 font-medium text-emerald-400 mb-6 text-lg tracking-tight">
+            <div className="p-8 rounded-3xl bg-cyan-500/[0.02] border border-cyan-500/20 hover:border-cyan-400/30 transition-all shadow-[0_0_30px_rgba(34,211,238,0.05)]">
+              <h4 className="flex items-center gap-3 font-medium text-cyan-400 mb-6 text-lg tracking-tight">
                 <CheckCircle2 className="w-5 h-5" /> With Kova Protocol
               </h4>
               <ul className="space-y-4 text-sm text-white/80 font-light">
-                <li className="flex items-start gap-3"><span className="text-emerald-500 mt-0.5 font-bold">›</span> Agent uses isolated key — never sees yours</li>
-                <li className="flex items-start gap-3"><span className="text-emerald-500 mt-0.5 font-bold">›</span> Smart contract enforces hard immutable rules</li>
-                <li className="flex items-start gap-3"><span className="text-emerald-500 mt-0.5 font-bold">›</span> Daily limits, per-call caps, strict allowlists</li>
-                <li className="flex items-start gap-3"><span className="text-emerald-500 mt-0.5 font-bold">›</span> Instant on-chain kill switch</li>
-                <li className="flex items-start gap-3"><span className="text-emerald-500 mt-0.5 font-bold">›</span> Every satoshi tracked with a strict nonce</li>
+                <li className="flex items-start gap-3"><span className="text-cyan-400 mt-0.5 font-bold">›</span> Agent uses isolated key — never sees yours</li>
+                <li className="flex items-start gap-3"><span className="text-cyan-400 mt-0.5 font-bold">›</span> Smart contract enforces hard immutable rules</li>
+                <li className="flex items-start gap-3"><span className="text-cyan-400 mt-0.5 font-bold">›</span> Daily limits, per-call caps, strict allowlists</li>
+                <li className="flex items-start gap-3"><span className="text-cyan-400 mt-0.5 font-bold">›</span> Instant on-chain kill switch</li>
+                <li className="flex items-start gap-3"><span className="text-cyan-400 mt-0.5 font-bold">›</span> Every satoshi tracked with a strict nonce</li>
               </ul>
             </div>
 
@@ -359,11 +363,11 @@ export default function HowItWorks() {
 
       {/* ─── Footer ─────────────────────────── */}
       <footer className="w-full relative z-10 border-t border-white/10 py-10 px-6 flex flex-col items-center justify-center text-center bg-[#050505]">
-        <img src="/kova-logo.png" alt="Kova Logo" className="w-8 h-8 rounded-lg grayscale opacity-70 mb-6 brightness-150" />
+        <img src="/kova-logo.png" alt="Kova Logo" className="w-8 h-8 rounded-lg opacity-70 mb-6" />
         <div className="flex gap-8 text-xs font-mono uppercase tracking-widest text-white/60 mb-6">
-          <a href="/" className="hover:text-white transition-colors">Platform</a>
-          <a href="#" className="hover:text-white transition-colors">Documentation</a>
-          <a href="https://github.com/KamiliaNHayati/kova.git" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
+          <a href="/" className="hover:text-white hover:text-cyan-400 transition-colors">Platform</a>
+          <a href="#" className="hover:text-white hover:text-cyan-400 transition-colors">Documentation</a>
+          <a href="https://github.com/KamiliaNHayati/kova.git" target="_blank" rel="noopener noreferrer" className="hover:text-white hover:text-cyan-400 transition-colors">GitHub</a>
         </div>
         <div className="text-[10px] text-white/40 uppercase tracking-widest">
           © {new Date().getFullYear()} Kova Protocol. Secured by Bitcoin.

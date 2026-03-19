@@ -13,7 +13,7 @@ import { STACKS_TESTNET } from "@stacks/network";
 
 const CONTRACT_ADDRESS = "STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37";
 const AGENT_WALLET = "agent-wallet-v7";
-const SERVICE_REGISTRY = "service-registry-v5";
+const SERVICE_REGISTRY = "service-registry-v6";
 
 const network = STACKS_TESTNET;
 
@@ -382,4 +382,18 @@ export function registerService(
     ],
     onFinish
   );
+}
+
+export function deleteService(index: number, callback: (data: any) => void) {
+  openContractCall({
+    contractAddress: CONTRACT_ADDRESS,
+    contractName: SERVICE_REGISTRY,
+    functionName: "delete-service",
+    functionArgs: [uintCV(index)],
+    network,
+    postConditionMode: PostConditionMode.Deny,
+    postConditions: [],
+    onFinish: callback,
+    onCancel: () => callback({ error: "cancelled" }),
+  });
 }

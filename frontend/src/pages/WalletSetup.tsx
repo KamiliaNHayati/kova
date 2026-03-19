@@ -19,23 +19,10 @@ import {
   type AgentKeypair,
 } from "../lib/agentKeys";
 import {
-  Settings,
-  Plus,
-  Wallet,
-  Info,
-  CheckCircle2,
-  Trash2,
-  Users,
-  ArrowUpCircle,
-  ArrowDownCircle,
-  Copy,
-  Key,
-  Zap,
-  Bot,
-  ChevronDown,
-  Shield,
-  ShieldCheck,
-  Cpu
+  Settings, Plus, Wallet, Info, CheckCircle2, Trash2, Users,
+  ArrowUpCircle, ArrowDownCircle, Copy, Key, Zap, Bot, ChevronDown,
+  Shield, ShieldCheck, Cpu, AlertTriangle,  // ← add this
+  RefreshCw
 } from "lucide-react";
 
 // Validation helpers
@@ -157,7 +144,8 @@ export default function WalletSetup() {
         setHasWallet(true);
         setWalletData(result.value);
         const bal = await getBalance(address!, agentAddr);
-        setEscrowBalance(bal?.value || 0);
+        const rawBal = bal?.value?.value ?? bal?.value ?? 0;
+        setEscrowBalance(typeof rawBal === "object" ? parseInt(rawBal.value || "0") : parseInt(String(rawBal)) || 0);
       } else {
         setHasWallet(false);
         setWalletData(null);
@@ -233,7 +221,9 @@ export default function WalletSetup() {
     deposit(agentAddr, amt, address, (data) => {
       if (data && data.error) { setTxError(`Deposit failed: ${data.error}`); setTxStatus(""); }
       else {
-        setTxStatus("Deposited!"); setDepositAmt("");
+        setTxStatus("Deposited!");
+        setTimeout(() => setTxStatus(""), 4000); // ← immediately after, same block
+        setDepositAmt("");
         pushAudit("DEPOSIT", { agentAddr, amount: amt });
         setTimeout(() => checkWallet(), 3000);
       }
@@ -260,7 +250,8 @@ export default function WalletSetup() {
     withdraw(agentAddr, amt, (data) => {
       if (data && data.error) { setTxError(`Withdraw failed: ${data.error}`); setTxStatus(""); }
       else { 
-        setTxStatus("Withdrawn!"); setWithdrawAmt(""); 
+        setTxStatus("Withdrawn!"); setWithdrawAmt("");
+        setTimeout(() => setTxStatus(""), 4000); 
         pushAudit("WITHDRAW", { agentAddr, amount: amt });
         setTimeout(() => checkWallet(), 3000); 
         setTimeout(() => checkWallet(), 8000);
@@ -331,6 +322,7 @@ export default function WalletSetup() {
         setTxStatus("");
       } else {
         setTxStatus("Limits updated!");
+        setTimeout(() => setTxStatus(""), 4000);
         pushAudit("SET_LIMITS", { agentAddr, dailyLimit: daily, perCallLimit: perCall });
         setNewDailyLimit("");
         setNewPerCallLimit("");
@@ -508,43 +500,56 @@ export default function WalletSetup() {
           
           {/* Agent Selector (Dropdown) */}
           {savedAgents.length > 0 && (
-            <div className="max-w-sm relative z-40">
-              <label className="block text-[10px] font-mono text-cyan-400/80 mb-2 uppercase tracking-widest">Active Node Setup</label>
-              <button
-                onClick={() => setAgentDropdownOpen(!agentDropdownOpen)}
-                className="w-full flex items-center justify-between px-4 py-3 bg-white/[0.02] border border-white/[0.08] rounded-2xl hover:bg-white/[0.04] transition-all shadow-lg"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-cyan-500/[0.05] border border-cyan-400/20 flex items-center justify-center shadow-inner">
-                    <Bot className="w-4 h-4 text-cyan-400" />
-                  </div>
-                  <div className="text-left">
-                    <p className="text-sm font-medium text-white/90">{savedAgents[selectedAgentIdx]?.label || "Agent"}</p>
-                    <p className="text-[10px] font-mono text-cyan-400/60 truncate max-w-[200px]">{savedAgents[selectedAgentIdx]?.address || "—"}</p>
-                  </div>
-                </div>
-                <ChevronDown className={`w-4 h-4 text-white/40 transition-transform duration-300 ${agentDropdownOpen ? "rotate-180" : ""}`} />
-              </button>
-              
-              {agentDropdownOpen && (
-                <div className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-white/10 rounded-2xl overflow-hidden shadow-2xl z-50 py-1">
-                  {savedAgents.map((agent, idx) => (
-                    <button
-                      key={agent.address}
-                      onClick={() => { setSelectedAgentIdx(idx); setAgentDropdownOpen(false); }}
-                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors text-left ${idx === selectedAgentIdx ? "bg-white/[0.02] relative" : ""}`}
-                    >
-                      {idx === selectedAgentIdx && <div className="absolute left-0 top-0 bottom-0 w-1 bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]" />}
-                      <Bot className={`w-4 h-4 flex-shrink-0 ${idx === selectedAgentIdx ? "text-cyan-400" : "text-white/40"}`} />
-                      <div>
-                        <p className={`text-sm font-medium ${idx === selectedAgentIdx ? "text-white" : "text-white/70"}`}>{agent.label}</p>
-                        <p className="text-[10px] font-mono text-white/40 truncate max-w-[220px]">{agent.address}</p>
+              <div className="max-w-sm relative z-40">
+                  <label className="block text-[10px] font-mono text-cyan-400/80 mb-2 uppercase tracking-widest">Active Node Setup</label>
+                  <div className="flex items-center gap-2">
+                      <div className="flex-1 relative">
+                          <button
+                              onClick={() => setAgentDropdownOpen(!agentDropdownOpen)}
+                              className="w-full flex items-center justify-between px-4 py-3 bg-white/[0.02] border border-white/[0.08] rounded-2xl hover:bg-white/[0.04] transition-all shadow-lg"
+                          >
+                              <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-xl bg-cyan-500/[0.05] border border-cyan-400/20 flex items-center justify-center shadow-inner">
+                                      <Bot className="w-4 h-4 text-cyan-400" />
+                                  </div>
+                                  <div className="text-left">
+                                      <p className="text-sm font-medium text-white/90">{savedAgents[selectedAgentIdx]?.label || "Agent"}</p>
+                                      <p className="text-[10px] font-mono text-cyan-400/60 truncate max-w-[150px]">{savedAgents[selectedAgentIdx]?.address || "—"}</p>
+                                  </div>
+                              </div>
+                              <ChevronDown className={`w-4 h-4 text-white/40 transition-transform duration-300 ${agentDropdownOpen ? "rotate-180" : ""}`} />
+                          </button>
+
+                          {agentDropdownOpen && (
+                              <div className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-white/10 rounded-2xl overflow-hidden shadow-2xl z-50 py-1">
+                                  {savedAgents.map((agent, idx) => (
+                                      <button
+                                          key={agent.address}
+                                          onClick={() => { setSelectedAgentIdx(idx); setAgentDropdownOpen(false); }}
+                                          className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors text-left ${idx === selectedAgentIdx ? "bg-white/[0.02] relative" : ""}`}
+                                      >
+                                          {idx === selectedAgentIdx && <div className="absolute left-0 top-0 bottom-0 w-1 bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]" />}
+                                          <Bot className={`w-4 h-4 flex-shrink-0 ${idx === selectedAgentIdx ? "text-cyan-400" : "text-white/40"}`} />
+                                          <div>
+                                              <p className={`text-sm font-medium ${idx === selectedAgentIdx ? "text-white" : "text-white/70"}`}>{agent.label}</p>
+                                              <p className="text-[10px] font-mono text-white/40 truncate max-w-[180px]">{agent.address}</p>
+                                          </div>
+                                      </button>
+                                  ))}
+                              </div>
+                          )}
                       </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+
+                      {/* Refresh button sits beside the dropdown */}
+                      <button
+                          onClick={() => { checkWallet(); fetchOperatorStatus(); }}
+                          className="p-3 rounded-2xl bg-white/[0.02] border border-white/[0.08] hover:bg-white/[0.08] transition-colors flex-shrink-0"
+                          title="Refresh"
+                      >
+                          <RefreshCw className="w-4 h-4 text-cyan-400" />
+                      </button>
+                  </div>
+              </div>
           )}
 
           {/* Top row: Escrow + Spending Limits */}
@@ -606,6 +611,23 @@ export default function WalletSetup() {
                 </div>
               </div>
             </Card>
+
+            {walletData && (
+                <div className="grid grid-cols-2 gap-3 mb-6 p-4 rounded-2xl bg-[#0A0A0A] border border-white/[0.05]">
+                    <div>
+                        <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">Current Daily</p>
+                        <p className="text-sm font-mono text-cyan-400">
+                            {(parseInt(walletData?.value?.["daily-limit"]?.value || walletData?.["daily-limit"]?.value || "0") / 1_000_000).toFixed(2)} STX
+                        </p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">Current Per-Call</p>
+                        <p className="text-sm font-mono text-cyan-400">
+                            {(parseInt(walletData?.value?.["per-call-limit"]?.value || walletData?.["per-call-limit"]?.value || "0") / 1_000_000).toFixed(2)} STX
+                        </p>
+                    </div>
+                </div>
+            )}
 
             {/* Spending Limits */}
             <Card
@@ -710,7 +732,7 @@ export default function WalletSetup() {
                   className="w-full px-4 py-3.5 bg-cyan-500/[0.05] border border-cyan-400/20 text-cyan-400 hover:bg-cyan-400 hover:text-black font-semibold rounded-xl transition-all flex items-center justify-center gap-2 hover:shadow-[0_0_15px_rgba(34,211,238,0.3)]"
                 >
                   <Zap className="w-4 h-4" />
-                  Generate New Identity
+                  Generate Agent
                 </button>
               ) : (
                 <p className="text-[10px] font-mono uppercase tracking-widest text-white/40 text-center py-3">Capacity limit reached (5/5)</p>

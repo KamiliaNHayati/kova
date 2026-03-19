@@ -1,12 +1,22 @@
 [
   {
     "name": "weather-feed",
-    "description": "Test service reusing price feed endpoint",
+    "description": "Real time weather (testing)",
     "url": "http://localhost:3402/api/price-feed",
-    "priceSTX": 2.5e-7,
-    "price": 0,
+    "priceSTX": "0.250000",
+    "price": 250000,
     "address": "ST1T38B636V6BFAHTBMHZE3H4J98M3JZXT9SPY4F7",
     "registeredAt": "2026-03-18T07:43:22.370Z",
+    "active": true
+  },
+  {
+    "name": "health",
+    "description": "Real time health",
+    "url": "http://localhost:3402/api/price-feed",
+    "priceSTX": "0.250000",
+    "price": 250000,
+    "address": "STB98064SK9G9J4XWP0T2KJDG37JQ3N3T84JMXX2",
+    "registeredAt": "2026-03-19T08:57:08.822Z",
     "active": true
   }
 ]

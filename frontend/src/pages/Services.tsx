@@ -26,7 +26,8 @@ import {
   Bot,
   ChevronDown,
   Cpu,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw
 } from "lucide-react";
 
 const STORAGE_KEY = "kova-allowed-services";
@@ -247,7 +248,10 @@ export default function Services() {
                 url: s.url,
                 verified: false,
             }))
-            .filter((s: any) => !MARKETPLACE_SERVICES.some(m => m.name === s.name));
+            .filter((s: any) => !MARKETPLACE_SERVICES.some(m => 
+                m.address === s.address || 
+                m.name.toLowerCase().replace(/[\s-]+/g, "") === s.name.toLowerCase().replace(/[\s-]+/g, "")
+            ))
         setOnChainServices(svcs);
     } catch (e) {
     }
@@ -366,12 +370,7 @@ export default function Services() {
     return services.some(s => s.address === addr && s.allowed);
   }
 
-  const allServices = [
-      ...MARKETPLACE_SERVICES,
-      ...onChainServices.filter(s => 
-          !MARKETPLACE_SERVICES.some(m => m.name === s.name)
-      )
-  ];
+  const allServices = [...MARKETPLACE_SERVICES, ...onChainServices];
 
   const filteredServices = allServices.filter((s) => {
     const matchesSearch = searchQuery === "" ||
@@ -405,7 +404,7 @@ export default function Services() {
 
           <div className="flex gap-1.5 p-1.5 rounded-2xl bg-white/[0.02] border border-white/[0.05] backdrop-blur-md w-fit">
             <button
-              onClick={() => setTab("marketplace")}
+              onClick={() => { setTab("marketplace"); loadOnChainServices(); }}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-medium transition-all duration-300 ${
                 tab === "marketplace" ? "bg-white text-black shadow-md" : "text-white/50 hover:text-white hover:bg-white/[0.04]"
               }`}
@@ -493,6 +492,15 @@ export default function Services() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-12 pr-4 py-3.5 bg-[#0A0A0A] border border-white/10 rounded-2xl text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-cyan-400 focus:bg-white/[0.02] transition-all shadow-inner focus:shadow-[0_0_10px_rgba(34,211,238,0.1)]"
                 />
+              </div>
+              <div>
+                <button
+                  onClick={loadOnChainServices}
+                  className="px-4 py-3.5 rounded-2xl bg-white/[0.02] border border-white/[0.05] text-white/40 hover:text-white hover:bg-white/[0.06] transition-colors flex items-center justify-center"
+                  title="Refresh services"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {["All", ...new Set(allServices.map(s => s.category))].map((cat) => (
@@ -643,6 +651,17 @@ export default function Services() {
             {/* Allowed services list */}
             <h3 className="font-medium text-white/90 mb-6 text-lg">Active Contract Boundaries</h3>
 
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="font-medium text-white/90 text-lg">Active Contract Boundaries</h3>
+                <button
+                onClick={loadAllowedServices}
+                className="p-3 rounded-2xl bg-white/[0.02] border border-white/[0.08] hover:bg-white/[0.08] transition-colors flex-shrink-0"
+                title="Refresh"
+              >
+                <RefreshCw className="w-4 h-4 text-cyan-400" />
+              </button>
+            </div>
+            
             {loading ? (
               <div className="flex flex-col items-center justify-center min-h-[30vh] text-white">
                 <div className="relative w-10 h-10 flex items-center justify-center mb-4">

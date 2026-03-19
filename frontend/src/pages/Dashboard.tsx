@@ -161,22 +161,19 @@ export default function Dashboard() {
       setTxStatus("Transaction submitted! Waiting for confirmation...");
       let attempts = 0;
       const poll = setInterval(async () => {
-        attempts++;
-        try {
-          await loadWallet();
-          if (wallet && (wallet.active === newState)) {
-            clearInterval(poll);
-            setTxStatus("Wallet updated!");
-            setTimeout(() => setTxStatus(""), 3000);
-            return;
-          }
-        } catch (e) {}
-
-        if (attempts >= 24) {
-          clearInterval(poll);
-          setTxStatus("Timed out — check transaction manually.");
-          setTimeout(() => setTxStatus(""), 5000);
-        }
+          attempts++;
+          try {
+              const result = await getWallet(address!, agentAddr);
+              const payload = result?.value?.value || result?.value || result;
+              const activeRaw = payload?.active;
+              const active = typeof activeRaw === "object" ? !!activeRaw.value : !!activeRaw;
+              if (active === newState || attempts >= 24) {
+                  clearInterval(poll);
+                  setTxStatus(active === newState ? "Wallet updated!" : "Timed out — check manually.");
+                  setTimeout(() => setTxStatus(""), newState === active ? 3000 : 5000);
+                  loadWallet(); // refresh UI
+              }
+          } catch {}
       }, 5000);
     });
   }
@@ -242,7 +239,7 @@ export default function Dashboard() {
                 {wallet?.active ? (
                   <>
                     <ShieldOff className="w-4 h-4 text-red-400 transition-transform group-hover:scale-110" />
-                    Engage Kill Switch
+                    Kill Switch
                   </>
                 ) : (
                   <>
@@ -386,28 +383,33 @@ export default function Dashboard() {
                 ) : (
                   <div className="flex-1 flex items-end gap-2 min-h-[160px] pt-4">
                     {[...spendHistory].sort((a, b) => a.nonce - b.nonce).map((entry, idx) => {
-                      const maxSpend = Math.max(...spendHistory.map(s => s.amount));
-                      const heightPercent = (entry.amount / maxSpend) * 100;
-                      const amountSTX = (entry.amount / 1_000_000).toFixed(4);
-                      return (
-                        <div key={entry.nonce} className="flex-1 flex flex-col items-center gap-2 group relative">
-                          <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-cyan-950/80 backdrop-blur-md border border-cyan-400/30 px-3 py-2 rounded-lg text-center z-20 pointer-events-none shadow-[0_0_15px_rgba(34,211,238,0.3)] min-w-[100px]">
-                            <span className="block text-xs font-medium text-cyan-400">{amountSTX} STX</span>
-                            <span className="block text-[9px] font-mono text-cyan-400/60 truncate w-20 mx-auto mt-1">{entry.service}</span>
-                          </div>
-                          
-                          <div className="w-full relative group-hover:-translate-y-1 transition-transform duration-300">
-                            <div
-                              className="w-full bg-cyan-500/20 rounded-sm min-h-[4px] border border-cyan-400/20 group-hover:bg-cyan-400/80 group-hover:shadow-[0_0_10px_rgba(34,211,238,0.6)] transition-all"
-                              style={{ height: `${Math.max(heightPercent, 5)}%` }}
-                            />
-                          </div>
-                          
-                          <span className="text-[9px] font-mono text-cyan-400/30 group-hover:text-cyan-400 transition-colors">#{entry.nonce}</span>
-                        </div>
-                      );
+                        const maxSpend = Math.max(...spendHistory.map(s => s.amount));
+                        const heightPx = Math.max((entry.amount / maxSpend) * 140, 8); // ← px not %
+                        return (
+                            <div key={entry.nonce} className="flex-1 flex flex-col items-center gap-2 group relative">
+                                {/* Permanent amount label above bar */}
+                                <span className="text-[8px] font-mono text-cyan-400/60 group-hover:text-cyan-400 transition-colors text-center leading-tight">
+                                    {(entry.amount / 1_000_000).toFixed(2)}
+                                </span>
+
+                                {/* Hover tooltip — keep for full detail */}
+                                <div className="absolute bottom-full mb-8 opacity-0 group-hover:opacity-100 transition-opacity bg-cyan-950/80 backdrop-blur-md border border-cyan-400/30 px-3 py-2 rounded-lg text-center z-20 pointer-events-none shadow-[0_0_15px_rgba(34,211,238,0.3)] min-w-[100px]">
+                                    <span className="block text-xs font-medium text-cyan-400">{(entry.amount / 1_000_000).toFixed(4)} STX</span>
+                                    <span className="block text-[9px] font-mono text-cyan-400/60 truncate w-20 mx-auto mt-1">{entry.service}</span>
+                                </div>
+                                
+                                <div className="w-full relative group-hover:-translate-y-1 transition-transform duration-300">
+                                    <div
+                                        className="w-full bg-cyan-500/20 rounded-sm border border-cyan-400/20 group-hover:bg-cyan-400/80 group-hover:shadow-[0_0_10px_rgba(34,211,238,0.6)] transition-all"
+                                        style={{ height: `${heightPx}px` }}
+                                    />
+                                </div>
+                                
+                                <span className="text-[9px] font-mono text-cyan-400/30 group-hover:text-cyan-400 transition-colors">#{entry.nonce}</span>
+                            </div>
+                        );
                     })}
-                  </div>
+                </div>
                 )}
 
                 {spendHistory.length > 0 && (
@@ -428,10 +430,13 @@ export default function Dashboard() {
                 </div>
 
                 <div className="text-center py-6 mb-4 relative z-10">
-                  <div className="text-5xl font-light text-cyan-400 drop-shadow-[0_0_12px_rgba(34,211,238,0.5)] tracking-tight mb-2">
-                    {spendHistory.length > 0 ? "100" : "0"}%
-                  </div>
-                  <p className="text-xs font-mono tracking-widest uppercase text-white/40">Execution Rate</p>
+                    <div className="text-5xl font-light text-cyan-400 drop-shadow-[0_0_12px_rgba(34,211,238,0.5)] tracking-tight mb-2">
+                        {spendHistory.length > 0
+                            ? (spendHistory.reduce((s, e) => s + e.amount, 0) / 1_000_000).toFixed(2)
+                            : "0.00"
+                        }
+                    </div>
+                    <p className="text-xs font-mono tracking-widest uppercase text-white/40">Total STX Spent</p>
                 </div>
 
                 <div className="space-y-4 mt-auto relative z-10">

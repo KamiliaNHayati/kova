@@ -10,9 +10,9 @@ plan:
       epoch: "3.2"
       transactions:
         - contract-publish:
-            contract-name: service-registry-v5
+            contract-name: service-registry-v6
             expected-sender: STWEW038MP9DGVVMBZMVBJ6KZXC39Y5NHWY5CC37
-            cost: 41840
-            path: "contracts/service-registry-v5.clar"
+            cost: 56980
+            path: "contracts/service-registry-v6.clar"
             anchor-block-only: true
             clarity-version: 4
