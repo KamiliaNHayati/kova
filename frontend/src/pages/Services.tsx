@@ -649,8 +649,6 @@ export default function Services() {
             </div>
 
             {/* Allowed services list */}
-            <h3 className="font-medium text-white/90 mb-6 text-lg">Active Contract Boundaries</h3>
-
             <div className="flex items-center justify-between mb-6">
               <h3 className="font-medium text-white/90 text-lg">Active Contract Boundaries</h3>
                 <button

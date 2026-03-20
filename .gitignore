@@ -11,7 +11,29 @@ coverage
 *.info
 costs-reports.json
 node_modules
+**/frontend/node_modules
+**/agent/node_modules
+
 
 **/agent/.env
+**/demo/agent/.env.example
 **/frontend/.env
 **/agent/kova_state.json
+
+# Test scratch files
+test-*.txt
+
+# Deployment scripts with private keys
+deploy-testnet.js
+demo/agent/check-keys.mjs
+
+# Build output
+frontend/dist/
+.cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
