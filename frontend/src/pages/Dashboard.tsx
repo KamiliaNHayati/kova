@@ -316,22 +316,22 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
               <StatCard
                 label="Total Escrow Balance"
-                value={`${(wallet.balance / 1_000_000).toFixed(2)} STX`}
+                value={`${((wallet?.balance || 0) / 1_000_000).toFixed(2)} STX`}
                 icon={<Wallet className="w-4 h-4" />}
               />
               <StatCard
                 label="Spent Today"
-                value={`${(wallet.spentToday / 1_000_000).toFixed(2)} STX`}
+                value={`${((wallet?.spentToday || 0) / 1_000_000).toFixed(2)} STX`}
                 icon={<ArrowUpRight className="w-4 h-4" />}
               />
               <StatCard
                 label="Hard Daily Limit"
-                value={`${(wallet.dailyLimit / 1_000_000).toFixed(2)} STX`}
+                value={`${((wallet?.dailyLimit || 0) / 1_000_000).toFixed(2)} STX`}
                 icon={<TrendingUp className="w-4 h-4" />}
               />
               <StatCard
                 label="Max Per-Call Limit"
-                value={`${(wallet.perCallLimit / 1_000_000).toFixed(2)} STX`}
+                value={`${((wallet?.perCallLimit || 0) / 1_000_000).toFixed(2)} STX`}
                 icon={<ArrowDownRight className="w-4 h-4" />}
               />
             </div>
@@ -345,7 +345,7 @@ export default function Dashboard() {
                 </div>
                 <div className="text-right">
                   <span className="text-xl font-medium tracking-tight text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
-                    {(wallet.spentToday / 1_000_000).toFixed(2)} <span className="text-sm opacity-80 text-cyan-400/80">/ {(wallet.dailyLimit / 1_000_000).toFixed(2)} STX</span>
+                    {((wallet?.spentToday || 0) / 1_000_000).toFixed(2)} <span className="text-sm opacity-80 text-cyan-400/80">/ {((wallet?.dailyLimit || 0) / 1_000_000).toFixed(2)} STX</span>
                   </span>
                 </div>
               </div>
@@ -353,7 +353,7 @@ export default function Dashboard() {
               <div className="h-2 bg-white/[0.04] rounded-full overflow-hidden relative z-10 border border-white/[0.02]">
                 <div
                   className="h-full rounded-full transition-all duration-1000 ease-out bg-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.8)]"
-                  style={{ width: `${Math.min(wallet.dailyLimit > 0 ? (wallet.spentToday / wallet.dailyLimit) * 100 : 0, 100)}%` }}
+                  style={{ width: `${Math.min((wallet?.dailyLimit || 0) > 0 ? ((wallet?.spentToday || 0) / (wallet?.dailyLimit || 1)) * 100 : 0, 100)}%` }}
                 ></div>
               </div>
             </div>

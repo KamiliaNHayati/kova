@@ -52,23 +52,29 @@ describe("setLimits validation", () => {
 });
 
 describe("registerService validation", () => {
+    const mockAddr = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+
     it("rejects empty name", () => {
-        expect(() => registerService("", "desc", "https://a.com", 10)).toThrow("Service name is required");
+        expect(() => registerService("", "desc", "https://a.com", 10, mockAddr)).toThrow("Service name is required");
     });
 
     it("rejects whitespace-only name", () => {
-        expect(() => registerService("   ", "desc", "https://a.com", 10)).toThrow("Service name is required");
+        expect(() => registerService("   ", "desc", "https://a.com", 10, mockAddr)).toThrow("Service name is required");
     });
 
     it("rejects empty URL", () => {
-        expect(() => registerService("svc", "desc", "", 10)).toThrow("Service URL is required");
+        expect(() => registerService("svc", "desc", "", 10, mockAddr)).toThrow("Service URL is required");
     });
 
     it("rejects zero price", () => {
-        expect(() => registerService("svc", "desc", "https://a.com", 0)).toThrow("Price per call must be greater than 0");
+        expect(() => registerService("svc", "desc", "https://a.com", 0, mockAddr)).toThrow("Price per call must be greater than 0");
     });
 
     it("rejects negative price", () => {
-        expect(() => registerService("svc", "desc", "https://a.com", -5)).toThrow("Price per call must be greater than 0");
+        expect(() => registerService("svc", "desc", "https://a.com", -5, mockAddr)).toThrow("Price per call must be greater than 0");
+    });
+
+    it("rejects empty payment address", () => {
+        expect(() => registerService("svc", "desc", "https://a.com", 10, "")).toThrow("Payment address is required");
     });
 });
